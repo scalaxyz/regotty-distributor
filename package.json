@@ -1,0 +1,17 @@
+{
+  "name": "regotty-distributor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end cover generation + 6-version packaging + RouteNote distribution automation",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "daemon": "node src/index.mjs --daemon",
+    "panel": "node src/panel.mjs",
+    "login": "node src/routenote.mjs login",
+    "render:test": "node src/render.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}

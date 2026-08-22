@@ -1,0 +1,23 @@
+# bağımlılıklar
+node_modules/
+
+# GİZLİ — secret'lar (JWT, RouteNote şifresi, CapSolver key)
+config/config.json
+
+# KİŞİYE ÖZEL veri (senin şarkı listen / dağıtım profillerin) — örnekleri (.example) tutulur
+input/input.csv
+artists/artists.csv
+
+# çalışma zamanı çıktıları / oturum (RouteNote cookie'leri!)
+state/
+output/
+
+# kapaklar kişiye özel (covers/README.txt tutulur)
+covers/*.jpg
+covers/*.jpeg
+covers/*.png
+
+# ses dosyaları ve loglar
+*.mp3
+*.wav
+*.log

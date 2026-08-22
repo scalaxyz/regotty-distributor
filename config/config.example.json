@@ -1,0 +1,98 @@
+{
+  "//": "Bunu config.json olarak kopyala ve <...> yerlerini doldur. config.json gitignore'da (gizli kalir).",
+
+  "schedule": {
+    "releasesPerDay": 30,
+    "intervalHours": 24,
+    "//stagger": "release'leri gune yay (spam gorunmesin) — release arasi dakika",
+    "staggerMinutes": 40
+  },
+
+  "quality": {
+    "//": "Risk skoru bu PENCEREDE olacak: minRiskScore <= risk < maxRiskScore (tanidik ama farkli).",
+    "minRiskScore": 20,
+    "maxRiskScore": 35,
+    "minLoudnessDb": -20,
+    "maxLoudnessDb": -6,
+    "minDurationSec": 30,
+    "requireNotSilent": true,
+    "maxRetries": 5
+  },
+
+  "vocalCheck": {
+    "//": "Vokal/lyrics anlasilirligi. Whisper varsa kelimeleri desifre edip olcer; yoksa ffmpeg muffle kontrolune duser.",
+    "enabled": true,
+    "whisperCmd": "auto",
+    "model": "base",
+    "language": "en",
+    "minWordsPerMin": 12,
+    "maxNoSpeech": 0.5,
+    "minLogprob": -1.0,
+    "maxCompression": 2.6,
+    "maxMuffleDropDb": 30,
+    "//demucs": "Vokal beatin altinda mi (stem ayirma ile KESIN olcum, pip install demucs). demucs PATH'te degilse 'python -m demucs'. minVocalPeakRatioDb: vokal tepe, beat tepesinden bu kadar dB asagidaysa dipte. minVocalRatioDb: ort backstop.",
+    "demucsCmd": "auto",
+    "minVocalPeakRatioDb": -4,
+    "minVocalRatioDb": -18
+  },
+
+  "regotty": {
+    "//": "Cover (sarki) uretimi icin ACE-Step/regotty backend'i. Calisir durumda olmali.",
+    "baseUrl": "http://127.0.0.1:3001",
+    "token": "<REGOTTY_JWT_TOKEN>",
+    "//retention": "Beat retention: retentionStart'tan baslar, risk penceresine gore yukselir/alcalir (min-max arasi).",
+    "retention": 0.22,
+    "retentionStart": 0.22,
+    "retentionMin": 0.19,
+    "retentionMax": 0.30,
+    "retentionStep": 0.03,
+    "//semantic": "Kaynaga yakinlik (coverSemanticStrength). Turbo modelde tavan 0.5 = FULL.",
+    "semantic": 0.5,
+    "model": "acestep-v15-xl-turbo"
+  },
+
+  "spotifyCredits": {
+    "//": "Besteci/writer icin Spotify credits. Taze token'i token server'dan alir; ulasilamazsa cache'e duser.",
+    "tokenServerUrl": "http://<SPOTIFY_TOKEN_SERVER_IP>:3000",
+    "tokenCachePath": "<...\\spotify-metadata-tools\\data\\token_cache.json>"
+  },
+
+  "routenote": {
+    "baseUrl": "https://www.routenote.com",
+    "uid": "<ROUTENOTE_UID>",
+    "//autoSubmit": "false = taslak birak (guvenli, elle kontrol et). true = otomatik yayina gonder (finalize).",
+    "autoSubmit": false,
+    "//auth": "Login gercek Chrome ile yapilir (bot-check + CapSolver ile reCAPTCHA).",
+    "login": { "username": "<ROUTENOTE_KULLANICI_ADI>", "password": "<ROUTENOTE_SIFRE>" },
+    "browser": { "channel": "chrome", "headless": false },
+    "captcha": {
+      "provider": "capsolver",
+      "apiKey": "<CAPSOLVER_API_KEY>",
+      "siteKey": "6LfCcwwTAAAAAPp-Ksxds8T1Kv3eo0zzaJO-yUu6",
+      "type": "ReCaptchaV2TaskProxyLess",
+      "isInvisible": false,
+      "pageUrl": "https://www.routenote.com/rn/login"
+    },
+    "label": "<LABEL_ADI>",
+    "copyrightYear": 2026,
+    "pLine": "{artist}, under exclusive license to <LABEL_ADI>",
+    "language": "English",
+    "genre": "Electronic",
+    "explicit": "Not Explicit",
+    "//stores": "Sadece bu 9 magaza (did numarasi -> ad).",
+    "stores": {
+      "13": "Spotify", "16": "Deezer", "24": "TIDAL", "27": "Nuuday",
+      "30": "Anghami", "33": "Pandora", "35": "iHeartRadio", "37": "Saavn", "51": "KKBOX"
+    },
+    "//cline": "© C-line = orijinal sanatcinin SAHNE adi (input.csv'deki artist). Mashup ise iki isim virgulle.",
+    "//releaseDate": "Yayin tarihi = uretim gunu (bugun)."
+  },
+
+  "paths": {
+    "input": "input/input.csv",
+    "artists": "artists/artists.csv",
+    "covers": "covers",
+    "output": "output",
+    "state": "state"
+  }
+}
