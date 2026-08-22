@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getTrackMeta } from './credits.mjs';
+import { readCsv, songKey } from './csv.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -57,15 +58,19 @@ const FILES = { input: 'input/input.csv', artists: 'artists/artists.csv', config
 
 async function status() {
   let cfg = null; try { cfg = await loadConfig(); } catch {}
-  const songsTotal = Math.max(0, await csvCount(rel('input/input.csv')));
+  let rows = []; try { rows = await readCsv(rel('input/input.csv')); } catch {}
   const artists = Math.max(0, await csvCount(rel('artists/artists.csv')));
   const covers = (await readdir(rel('covers')).catch(() => [])).filter((f) => /\.(jpe?g|png)$/i.test(f));
-  let inputIndex = 0; try { inputIndex = JSON.parse(await readFile(rel('state/rotation.json'), 'utf8')).inputIndex || 0; } catch {}
+  // done tracked by song identity (artist+song), not position — see csv.mjs
+  let doneList = []; try { const st = JSON.parse(await readFile(rel('state/rotation.json'), 'utf8')); if (Array.isArray(st.done)) doneList = st.done; } catch {}
+  const doneSet = new Set(doneList);
+  const songsTotal = rows.length;
+  const songsDone = rows.filter((r) => doneSet.has(songKey(r))).length;
   const isPlaceholder = (v) => !v || /[<>]|BURAYA|^\.{3}$/.test(String(v));
   const configReady = !!cfg && [cfg.regotty?.token, cfg.routenote?.login?.username, cfg.routenote?.login?.password, cfg.routenote?.captcha?.apiKey, cfg.routenote?.uid].every((v) => !isPlaceholder(v));
   return {
     configExists: !!cfg, configReady,
-    songsTotal, songsPending: Math.max(0, songsTotal - inputIndex), songsDone: Math.min(songsTotal, inputIndex),
+    songsTotal, songsPending: Math.max(0, songsTotal - songsDone), songsDone, doneKeys: [...doneSet],
     artists, covers: covers.length, coverNames: covers,
     loggedIn: existsSync(rel('state/routenote-session.json')),
     running: childKind, autoSubmit: cfg?.routenote?.autoSubmit === true,
@@ -452,7 +457,8 @@ $('#tabs').innerHTML=Object.keys(TABS).map(function(k){return '<div class="tab" 
 $('#tabs').onclick=function(e){var t=e.target.closest('.tab');if(t){tab=t.dataset.k;renderTab()}};
 var FNAME={queue:'input',artists:'artists',config:'config'};
 var TABLES={queue:{cols:[{k:'artist',ph:'Orijinal sanatçı (© C-line)'},{k:'song',ph:'Şarkı adı'},{k:'url',ph:'Spotify link (opsiyonel)',mono:true},{k:'instrumental',type:'check',label:'🎹 Enst.',title:'İşaretliyse bu şarkının INSTRUMENTAL versiyonu üretilir (vokal ayrılıp çıkarılır), "... - Instrumental" diye isimlenir.'}],status:true,header:['artist','song','url','instrumental']},artists:{cols:[{k:'artist_name',ph:'Profil adı'},{k:'spotify_url',ph:'https://open.spotify.com/artist/…',mono:true}],status:false,header:['artist_name','spotify_url']}};
-var doneCount=0;
+var doneCount=0;var doneKeys={};
+function qkey(a,s){return String(a==null?'':a).trim().toLowerCase()+'|'+String(s==null?'':s).trim().toLowerCase()}
 function csvSplit(line){var o=[],c='',q=false;for(var i=0;i<line.length;i++){var ch=line[i];if(q){if(ch==='"'&&line[i+1]==='"'){c+='"';i++}else if(ch==='"'){q=false}else c+=ch}else if(ch==='"')q=true;else if(ch===','){o.push(c);c=''}else c+=ch}o.push(c);return o.map(function(s){return s.trim()})}
 function parseCsv(text,header){var lines=String(text||'').split(/\\r?\\n/).filter(function(l){return l.trim()!==''});if(!lines.length)return [];var start=(lines[0]&&csvSplit(lines[0])[0].toLowerCase()===header[0].toLowerCase())?1:0;return lines.slice(start).map(csvSplit)}
 function csvCell(v){v=String(v==null?'':v);return /[",\\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}
@@ -476,7 +482,7 @@ function renderTableTab(name){
   var lk=name==='queue'?'<div class="lookup"><span class="lki">'+IC.link+'</span><input id="lk" placeholder="Spotify şarkı linki yapıştır → sanatçı + şarkı otomatik dolar" onkeydown="if(event.key===\\'Enter\\'){event.preventDefault();lookupAdd()}"><button id="lkb" class="p" onclick="lookupAdd()">'+IC.link+'Çek</button></div>':'';
   pn.innerHTML='<div class="hint">'+hints[name]+'</div>'+lk+'<div class="tblwrap"><table class="tbl"><thead><tr>'+ths+'</tr></thead><tbody id="tb"></tbody></table></div><div class="saverow"><button onclick="addRow()">+ Satır ekle</button><button class="p" onclick="saveTable()">'+IC.save+'Kaydet</button><span class="saved" id="sv">'+IC.check+'kaydedildi</span></div>';
   Promise.all([api('/api/file?name='+FNAME[name]),api('/api/status')]).then(function(a){
-    doneCount=a[1].songsDone||0;var rows=parseCsv(a[0].text,t.header);var tb=$('#tb');tb.innerHTML='';
+    doneCount=a[1].songsDone||0;doneKeys={};(a[1].doneKeys||[]).forEach(function(k){doneKeys[k]=1});var rows=parseCsv(a[0].text,t.header);var tb=$('#tb');tb.innerHTML='';
     if(!rows.length){addRow();return;}
     rows.forEach(function(r,i){tb.appendChild(rowEl(name,r,i))});
   });
@@ -487,7 +493,7 @@ function rowEl(name,vals,i){
   cells+=t.cols.map(function(c,ci){
     if(c.type==='check'){var on=/^(1|yes|true|evet|x|on)$/i.test(String(vals[ci]||'').trim());return '<td class="cell chk"'+(c.title?' title="'+esc(c.title)+'"':'')+'><input type="checkbox" data-k="'+esc(c.k)+'"'+(on?' checked':'')+'></td>'}
     return '<td class="cell'+(c.mono?' mono':'')+'"><input value="'+esc(vals[ci]||'').replace(/"/g,'&quot;')+'" placeholder="'+esc(c.ph)+'"></td>'}).join('');
-  if(t.status){var done=(name==='queue'&&i<doneCount);cells+='<td class="st"><span class="badge '+(done?'done':'wait')+'"><span class="d"></span>'+(done?'işlendi':'sırada')+'</span></td>'}
+  if(t.status){var done=(name==='queue'&&!!doneKeys[qkey(vals[0],vals[1])]);cells+='<td class="st"><span class="badge '+(done?'done':'wait')+'"><span class="d"></span>'+(done?'işlendi':'sırada')+'</span></td>'}
   cells+='<td class="act"><button class="del" title="sil" onclick="this.closest(\\'tr\\').remove()">✕</button></td>';
   tr.innerHTML=cells;return tr;
 }

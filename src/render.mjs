@@ -17,11 +17,21 @@ const rate = (speed, extra = '') => `aresample=${R},asetrate=${Math.round(R * sp
 // 90% muffle cutoff, same geometric mapping as the app (20kHz -> ~500 Hz).
 const MUFFLE_CUTOFF = Math.round(20000 * Math.pow(400 / 20000, 0.9)); // ~500
 
+// Reverb amount r (%) -> short aecho tail approximating the app's convolver wet
+// mix (audioEdits.ts: wet.gain = r/100 * 0.9). The two decay taps carry the wet
+// amount; `delays` set the room character. r=0 => dry (no reverb).
+const reverb = (r, delays = '60|90') =>
+  r ? `,aecho=0.85:0.9:${delays}:${(r / 100 * 0.9).toFixed(3)}|${(r / 100 * 0.55).toFixed(3)}` : '';
+
+// Reverb amounts per version (%), matching the browser Distribute flow's scale.
+const SLOWED_REVERB = 15; // eskiden 40
+const ULTRA_REVERB = 15;  // eskiden 60
+
 // suffix matches the RouteNote track naming exactly (see docs/routenote-flow.md).
 export const VERSIONS = [
   { suffix: '', label: 'Original', filter: '' },
-  { suffix: ' - Slowed', label: 'Slowed', filter: rate(0.8, ',aecho=0.85:0.75:60|90:0.35|0.22') },
-  { suffix: ' - Ultra Slowed', label: 'Ultra Slowed', filter: rate(0.6, ',aecho=0.85:0.8:80|130:0.45|0.3') },
+  { suffix: ' - Slowed', label: 'Slowed', filter: rate(0.8, reverb(SLOWED_REVERB, '60|90')) },
+  { suffix: ' - Ultra Slowed', label: 'Ultra Slowed', filter: rate(0.6, reverb(ULTRA_REVERB, '80|130')) },
   { suffix: ' - Slowed but Muffled', label: 'Slowed but Muffled', filter: rate(0.75, `,aecho=0.85:0.7:60|90:0.3|0.2,lowpass=f=${MUFFLE_CUTOFF}`) },
   { suffix: ' - Sped Up', label: 'Sped Up', filter: rate(1.2) },
   { suffix: ' - 8D Audio', label: '8D Audio', filter: 'apulsator=mode=sine:hz=0.13:width=0.9' },
