@@ -2,9 +2,10 @@
   "//": "Bunu config.json olarak kopyala ve <...> yerlerini doldur. config.json gitignore'da (gizli kalir).",
 
   "schedule": {
-    "releasesPerDay": 30,
+    "//releasesPerDay": "Daemon'in GUNLUK hedefi: gunde bu kadar release'i SIRAYLA (araliksiz) uretir, dolunca ERTESI GUNE kadar bekler, kuyruk bitene dek surer. (Panel'deki 'N Release' butonu bundan bagimsiz — orada sayi elle girilir.)",
+    "releasesPerDay": 10,
+    "//deprecated": "intervalHours/staggerMinutes artik kullanilmiyor (daemon takvim gunune gore calisir).",
     "intervalHours": 24,
-    "//stagger": "release'leri gune yay (spam gorunmesin) — release arasi dakika",
     "staggerMinutes": 40
   },
 

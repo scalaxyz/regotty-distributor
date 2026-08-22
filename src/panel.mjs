@@ -25,19 +25,44 @@ const pushLog = (line) => { for (const l of String(line).split(/\r?\n/)) if (l.t
 // ---- child process (daemon / one-shot / login) -------------------------------
 let child = null;
 let childKind = null;
-function runChild(kind, args) {
-  if (child) return { error: 'Zaten çalışan bir işlem var. Önce durdur.' };
-  childKind = kind;
+let manualStop = false;
+let restarts = 0;
+let lastStart = 0;
+function spawnChild(kind, args) {
+  childKind = kind; lastStart = Date.now();
   pushLog('▶ ' + kind + ' başladı — node ' + args.join(' '));
   const c = spawn(process.execPath, args, { cwd: ROOT, windowsHide: true, env: { ...process.env } });
   child = c;
   c.stdout.on('data', (d) => pushLog(d.toString()));
   c.stderr.on('data', (d) => pushLog(d.toString()));
   c.on('error', (e) => pushLog('HATA: ' + e.message));
-  c.on('close', (code) => { pushLog('■ ' + childKind + ' bitti (kod ' + code + ')'); child = null; childKind = null; });
+  c.on('close', (code) => {
+    pushLog('■ ' + kind + ' bitti (kod ' + code + ')');
+    child = null;
+    // Daemon is meant to run for days; a native crash (non-zero code, e.g. a torch
+    // fail-fast that JS can't catch) shouldn't stop the night's run — auto-restart
+    // it. The key-based rotation + persisted daily count resume where it left off.
+    const crashed = code !== 0 && code !== null;
+    if (/^daemon/.test(kind) && crashed && !manualStop) {
+      if (Date.now() - lastStart > 5 * 60_000) restarts = 0; // ran a while -> fresh budget
+      if (restarts < 30) {
+        restarts++;
+        pushLog('↻ daemon çöktü (kod ' + code + ') — 5 sn sonra otomatik yeniden başlatılıyor (' + restarts + '. kez). Kaldığı yerden devam eder.');
+        setTimeout(() => { if (!manualStop && !child) spawnChild(kind, args); }, 5000);
+        return;
+      }
+      pushLog('⚠ daemon çok kez üst üste çöktü — otomatik yeniden başlatma durduruldu. Elle başlat.');
+    }
+    childKind = null;
+  });
+}
+function runChild(kind, args) {
+  if (child) return { error: 'Zaten çalışan bir işlem var. Önce durdur.' };
+  manualStop = false; restarts = 0;
+  spawnChild(kind, args);
   return { ok: true };
 }
-function stopChild() { if (!child) return { error: 'Çalışan işlem yok' }; child.kill(); pushLog('⏹ durduruldu'); return { ok: true }; }
+function stopChild() { if (!child) return { error: 'Çalışan işlem yok' }; manualStop = true; child.kill(); pushLog('⏹ durduruldu'); return { ok: true }; }
 
 // Whisper availability (word-level lyrics check). Detected once via detectWhisper()
 // — called after startup so `loadConfig` (a const below) is already initialized.
@@ -139,11 +164,12 @@ const server = createServer(async (req, res) => {
     }
 
     if (p === '/api/run' && req.method === 'POST') {
-      const { kind } = JSON.parse(await body(req));
+      const { kind, count } = JSON.parse(await body(req));
+      const n = Math.max(1, Math.min(999, parseInt(count, 10) || 1));
       const map = {
         login: ['src/routenote.mjs', 'login'],
-        once: ['src/index.mjs'],
-        'once-publish': ['src/index.mjs', '--publish'],
+        batch: ['src/index.mjs', '--count', String(n)],
+        'batch-publish': ['src/index.mjs', '--count', String(n), '--publish'],
         daemon: ['src/index.mjs', '--daemon'],
         'daemon-publish': ['src/index.mjs', '--daemon', '--publish'],
       };
@@ -273,6 +299,9 @@ button.r{color:var(--bad);border-color:rgba(251,113,133,.32);background:rgba(251
 button.r:hover{background:rgba(251,113,133,.15)}
 button:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .sep{width:1px;height:26px;background:var(--line);margin:0 2px}
+.batchwrap{display:inline-flex;align-items:center;gap:3px;color:var(--dim);font-weight:700;font-size:15px}
+.batchwrap input{width:54px;background:rgba(0,0,0,.28);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 6px;font:600 14px 'JetBrains Mono',monospace;text-align:center}
+.batchwrap input:focus{outline:none;border-color:var(--v);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
 /* tooltip */
 [data-tip]{position:relative}
 [data-tip]::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 12px);transform:translate(-50%,6px);width:max-content;max-width:260px;white-space:normal;text-align:left;font:400 12.5px/1.5 Inter,sans-serif;color:var(--fg);background:rgba(17,23,37,.94);backdrop-filter:blur(14px);border:1px solid var(--line2);border-radius:12px;padding:10px 13px;box-shadow:0 20px 44px -18px #000,0 1px 0 rgba(255,255,255,.07) inset;opacity:0;pointer-events:none;transition:opacity .18s cubic-bezier(.2,.7,.2,1),transform .18s cubic-bezier(.2,.7,.2,1);z-index:70}
@@ -407,11 +436,12 @@ function BODY() { return `<div class="aurora"><i></i><i></i><i></i></div><div cl
 <section class="actions glass">
 <button class="p" onclick="run('login')" data-tip="Chrome açılır, captcha otomatik çözülür ve RouteNote oturumu açılır. Oturum kaydedilir; her seferinde gerekmez.">` + ic('key') + `RouteNote Giriş</button>
 <span class="sep"></span>
-<button onclick="run('once')" data-tip="Bir kez çalışır: 1 release üretir ve RouteNote'ta TASLAK bırakır. Yayınlanmaz — sen kontrol edip elle yayınlarsın.">` + ic('play') + `1 Release · taslak</button>
-<button class="g" onclick="run('once-publish')" data-tip="Bir kez çalışır: 1 release üretir ve doğrudan YAYINA gönderir (9 mağazaya dağıtılır).">` + ic('rocket') + `1 Release · yayınla</button>
+<span class="batchwrap" data-tip="Kaç release yapılacağını yaz. O sayıda üretir (sırayla, aralıksız), sonra durur.">×<input id="batchN" type="number" min="1" max="999" value="9"></span>
+<button id="btnBatch" onclick="run('batch')" data-tip="Belirttiğin SAYIDA release üretir (sırayla, aralıksız), sonra durur ve 'işlem bitti' der. Hepsi TASLAK kalır — sen kontrol edip elle yayınlarsın.">` + ic('play') + `Release · taslak</button>
+<button class="g" id="btnBatchPub" onclick="run('batch-publish')" data-tip="Belirttiğin SAYIDA release üretir (sırayla), her birini otomatik YAYINA gönderir (9 mağaza), sonra durur.">` + ic('rocket') + `Release · yayınla</button>
 <span class="sep"></span>
-<button id="btnDaemon" onclick="run('daemon')" data-tip="Arka planda sürekli çalışır: günlük hedef kadar release üretir, hepsini taslak bırakır.">` + ic('loop') + `Daemon · taslak</button>
-<button class="g" id="btnDaemonPub" onclick="run('daemon-publish')" data-tip="Arka planda sürekli çalışır: günlük hedef kadar release üretir ve otomatik yayınlar.">` + ic('loop') + `Daemon · yayınla</button>
+<button id="btnDaemon" onclick="run('daemon')" data-tip="Günde 'günlük hedef' kadar release'i SIRAYLA (aralıksız) üretir, o günkü hedef dolunca ERTESİ GÜNE kadar bekler, kuyruk bitene dek sürer. Taslak bırakır. (PC'yi açık bırak, günlerce çalışır.)">` + ic('loop') + `Daemon · taslak</button>
+<button class="g" id="btnDaemonPub" onclick="run('daemon-publish')" data-tip="Daemon gibi çalışır ama her release'i otomatik YAYINA gönderir. Durdurana kadar, kuyruk bitene dek sürer.">` + ic('loop') + `Daemon · yayınla</button>
 <button class="r" onclick="stop()" data-tip="Çalışan işlemi (tek release ya da daemon) durdurur.">` + ic('stop') + `Durdur</button>
 <label class="switch" data-tip="Açıkken üretilen release'ler otomatik YAYINLANIR; kapalıyken TASLAK kalır. --yayınla butonlarıyla aynı etkiyi kalıcı yapar."><input type="checkbox" id="auto" onchange="setAuto(this.checked)"><span class="track"></span>otomatik yayınla</label>
 </section>
@@ -434,9 +464,9 @@ function refresh(){api('/api/status').then(function(s){
   var pills=[['RouteNote',s.loggedIn?'giriş yapıldı':'giriş yok',s.loggedIn?'on':'off'],['Ayar',s.configReady?'hazır':'eksik',s.configReady?'on':'off'],['Durum',s.running?('çalışıyor · '+s.running):'boşta',s.running?'run':''],['autoSubmit',s.autoSubmit?'AÇIK':'kapalı',s.autoSubmit?'run':''],['Vokal',s.vocalMode==='whisper'?'kelime kontrolü':(s.vocalMode==='off'?'kapalı':'muffle'),s.vocalMode==='whisper'?'on':'']];
   $('#pills').innerHTML=pills.map(function(p){return '<span class="pill '+p[2]+'"><span class="d"></span><b style="color:inherit;font-weight:600">'+p[0]+'</b> '+p[1]+'</span>'}).join('');
   s._daily=s.schedule?s.schedule.releasesPerDay:0;
-  var _per=s._daily, _ih=s.schedule?s.schedule.intervalHours:24;
-  var _td=$('#btnDaemon'); if(_td)_td.setAttribute('data-tip','Arka planda SÜREKLİ çalışır: günde '+_per+' release\\'i '+_ih+' saate yayarak üretir, hepsini TASLAK bırakır. Durdurana kadar devam eder.');
-  var _tdp=$('#btnDaemonPub'); if(_tdp)_tdp.setAttribute('data-tip','Arka planda SÜREKLİ çalışır: günde '+_per+' release üretir ve her birini otomatik YAYINA gönderir. Durdurana kadar devam eder.');
+  var _per=s._daily;
+  var _td=$('#btnDaemon'); if(_td)_td.setAttribute('data-tip','Günde '+_per+' release\\'i SIRAYLA (aralıksız) üretir, o günkü '+_per+' dolunca ERTESİ GÜNE kadar bekler, kuyruk bitene dek sürer. TASLAK bırakır. (PC açık kalsın, günlerce çalışır.)');
+  var _tdp=$('#btnDaemonPub'); if(_tdp)_tdp.setAttribute('data-tip','Günde '+_per+' release SIRAYLA üretir ve her birini otomatik YAYINA gönderir; o günkü hedef dolunca ertesi güne kadar bekler. Durdurana kadar sürer.');
   if(!built){built=true;$('#cards').innerHTML=STAT.map(function(a,i){
     var body=a[4]
       ? '<div class="stepper"><input class="statedit num" id="daily" type="number" min="1" max="999" value="'+(s._daily||30)+'" oninput="sizeDaily()" onchange="saveDaily(this.value)" onkeydown="if(event.key===\\'Enter\\')this.blur()"><div class="steps"><button type="button" class="step" aria-label="artır" onclick="stepDaily(1)"><svg viewBox="0 0 16 16"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button type="button" class="step" aria-label="azalt" onclick="stepDaily(-1)"><svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>'
@@ -511,7 +541,7 @@ function setCard(i,cls,note){var c=$('#card'+i);if(c){c.classList.remove('warn',
 function loadCovers(names){var c=$('#covs');if(!c)return;c.innerHTML=(names||[]).map(function(n){return '<div class="cov"><img src="/covers-preview?n='+encodeURIComponent(n)+'"><b onclick="delCover(\\''+n.replace(/\\\\/g,'').replace(/'/g,'')+'\\')">✕</b></div>'}).join('')||'<div class="hint" style="grid-column:1/-1">Henüz kapak yok — yukarıdan ekle.</div>';}
 function upload(files){var q=[];for(var i=0;i<files.length;i++)(function(f){q.push(new Promise(function(res){var fr=new FileReader();fr.onload=function(){api('/api/cover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:f.name,data:fr.result})}).then(res)};fr.readAsDataURL(f)}))})(files[i]);Promise.all(q).then(refresh)}
 function delCover(n){api('/api/cover?name='+encodeURIComponent(n),{method:'DELETE'}).then(refresh)}
-function run(kind){api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind})}).then(function(r){if(r.error)toast(r.error);refresh()})}
+function run(kind){var count=1;var bn=$('#batchN');if(bn&&kind.indexOf('batch')===0)count=Math.max(1,parseInt(bn.value,10)||1);api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,count:count})}).then(function(r){if(r.error)toast(r.error);refresh()})}
 function stop(){api('/api/stop',{method:'POST'}).then(refresh)}
 function setAuto(v){if(v&&!confirm('autoSubmit AÇILIYOR — üretilen release\\'ler otomatik YAYINA gönderilir. Emin misin?')){$('#auto').checked=false;return}api('/api/autosubmit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})}).then(refresh)}
 function sizeDaily(){var de=$('#daily');if(de)de.style.width=(((''+de.value).length||1)+0.3)+'ch'}

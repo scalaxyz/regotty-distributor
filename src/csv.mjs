@@ -46,6 +46,10 @@ async function loadState(stateDir) {
 /** Stable identity for a queue row — survives reordering/editing of input.csv. */
 export const songKey = (s) => `${String(s?.artist || '').trim().toLowerCase()}|${String(s?.song || '').trim().toLowerCase()}`;
 
+/** Local calendar day (YYYY-MM-DD) — daemon's daily target rolls over on this. */
+export const localDay = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 async function saveState(stateDir, state) {
   await mkdir(stateDir, { recursive: true });
   await writeFile(path.join(stateDir, 'rotation.json'), JSON.stringify(state, null, 2));
@@ -91,5 +95,15 @@ export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
     },
     /** peek + commit (legacy convenience). */
     async next() { const it = this.peek(); if (!it) return null; await this.commit(); return it; },
+    /** Releases actually produced TODAY (auto-resets when the calendar day changes). */
+    releasedToday() { return state.day === localDay() ? (state.dayCount || 0) : 0; },
+    /** Record one produced release (drives the daemon's per-day target). Persisted
+     *  so a crash + auto-restart resumes today's count instead of restarting at 0. */
+    async markReleased() {
+      const today = localDay();
+      if (state.day !== today) { state.day = today; state.dayCount = 0; }
+      state.dayCount = (state.dayCount || 0) + 1;
+      await saveState(stateDir, state);
+    },
   };
 }

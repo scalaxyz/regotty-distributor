@@ -21,3 +21,10 @@ covers/*.png
 *.mp3
 *.wav
 *.log
+
+# pinterest kapak indirici (tarayıcı profili = oturum verisi!) — yerelde kalsın,
+# istenirse gözden geçirip ayrıca eklenir
+.pinterest_browser_profile/
+pinterest_manifest.csv
+aesthetic_cover_downloader.py
+pinterest_to_3000_v2.py

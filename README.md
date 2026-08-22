@@ -3,7 +3,7 @@
 CSV → cover üret → risk/kalite geçidi → 6 versiyon (MP3 320/44.1) → besteci (Spotify) →
 kapak seç → **RouteNote'a otomatik yükle** (9 mağaza) → (isteğe bağlı) yayına gönder.
 
-Login gerçek Chrome + CapSolver ile otomatik yapılır. Günlük hedef kadar release güne yayılır (hedef panelden / config'den ayarlanır).
+Login gerçek Chrome + CapSolver ile otomatik yapılır. Daemon günde **günlük hedef** kadar release'i sırayla (aralıksız) üretir, hedef dolunca ertesi güne kadar bekler, kuyruk bitene dek sürer (hedef panelden / config'den ayarlanır). Panelden **N release** (belirttiğin sayı kadar, sonra durur) da başlatılabilir.
 
 ---
 
@@ -74,15 +74,16 @@ Arelio,https://open.spotify.com/artist/4ncJbWxCwsZ2YMjc1mSN1l
 npm run panel
 ```
 → tarayıcıda **http://localhost:4599**. Kuyruğu/sanatçıları/config'i düzenle, kapak yükle,
-**RouteNote'a giriş yap**, 1 release veya daemon başlat, canlı logları izle, autoSubmit'i aç/kapa.
+**RouteNote'a giriş yap**, **N release** (sayıyı gir → sırayla üretir, biter) ya da **daemon** (günlük hedef kadar sırayla, ertesi gün devam) başlat, canlı logları izle, autoSubmit'i aç/kapa.
 
 ### Komut satırı (alternatif)
 ```
-npm run login              # RouteNote'a giriş (Chrome açılır, captcha otomatik çözülür)
-npm start                  # 1 release üret → RouteNote TASLAK oluştur
-npm start -- --publish     # 1 release üret → RouteNote'a YAYINLA (finalize)
-npm run daemon             # günlük hedef kadar release/gün, güne yayılmış (taslak)
-npm run daemon -- --publish  # ... otomatik yayınla
+npm run login                 # RouteNote'a giriş (Chrome açılır, captcha otomatik çözülür)
+npm start                     # 1 release üret → TASLAK
+npm start -- --count 9        # 9 release SIRAYLA üret → sonra durur ("işlem bitti")
+npm start -- --count 9 --publish   # 9 release sırayla → her birini YAYINLA, sonra durur
+npm run daemon                # günlük hedef kadar sırayla üret, sonra ertesi gün; kuyruk bitene dek (taslak)
+npm run daemon -- --publish   # ... her birini otomatik yayınla
 ```
 > `--publish` yoksa release **taslak** kalır (RouteNote'ta kontrol edip elle "Complete Release" diyebilirsin).
 > `config.routenote.autoSubmit: true` yaparsan `--publish` olmadan da otomatik yayınlar.

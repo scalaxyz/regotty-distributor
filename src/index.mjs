@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createRotation } from './csv.mjs';
+import { createRotation, localDay } from './csv.mjs';
 import { pickCover, consumeCover } from './covers.mjs';
 import { generateCover, retryCover, cleanupItem, downloadAudio } from './regotty.mjs';
 import { computeRisk } from './risk.mjs';
@@ -162,42 +162,59 @@ async function runOne(cfg) {
 }
 
 async function main() {
-  const cfg = await loadConfig();
-  runOne._rotation = createRotation({
-    inputCsv: rel(cfg.paths.input),
-    artistsCsv: rel(cfg.paths.artists),
-    stateDir: rel(cfg.paths.state),
-  });
+  let cfg = await loadConfig();
+  // Reload config + rebuild the rotation before each release so panel edits (queue
+  // songs, daily target, thresholds, autoSubmit) apply live without a restart.
+  const rebuild = () => {
+    runOne._rotation = createRotation({
+      inputCsv: rel(cfg.paths.input),
+      artistsCsv: rel(cfg.paths.artists),
+      stateDir: rel(cfg.paths.state),
+    });
+    return runOne._rotation;
+  };
 
   const daemon = process.argv.includes('--daemon');
-  if (!daemon) {
-    try { const r = await runOne(cfg); if (r?.skipped) log(`atlandı: ${r.reason}`); }
-    catch (e) { log('hata:', e.message); }
-    return;
+  const ci = process.argv.indexOf('--count');
+  const count = ci >= 0 ? Math.max(1, parseInt(process.argv[ci + 1], 10) || 1) : 1;
+
+  if (daemon) {
+    // Daemon: do `releasesPerDay` releases back-to-back (no stagger), then wait
+    // until the next calendar day and continue — until the queue empties. Runs
+    // until stopped. Today's count is persisted, so a crash+restart resumes the
+    // day's tally instead of starting over.
+    log('=== daemon başladı — günlük hedef kadar sırayla, sonra ertesi gün (durdurana kadar) ===');
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      cfg = await loadConfig().catch(() => cfg);
+      const rot = rebuild();
+      const per = Math.max(1, cfg.schedule?.releasesPerDay ?? 10);
+      if (rot.releasedToday() >= per) {
+        const d = localDay();
+        log(`bugünkü hedef doldu (${per}/${per}) — ertesi gün bekleniyor…`);
+        while (localDay() === d) await sleep(10 * 60_000); // wake when the day rolls over
+        continue;
+      }
+      if (!rot.hasNext()) { log('kuyruk boş — 60 sn sonra tekrar bakılacak (yeni şarkı eklenebilir)'); await sleep(60_000); continue; }
+      let r; try { r = await runOne(cfg); } catch (e) { log('hata:', e.message); await sleep(10_000); continue; }
+      if (r?.skipped) { log(`atlandı: ${r.reason}`); if (/boş/.test(r.reason)) await sleep(60_000); }
+      else { await rot.markReleased(); log(`bugün ${rot.releasedToday()}/${per} tamamlandı`); }
+    }
   }
 
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    // Re-read the schedule each cycle so panel edits (günlük hedef) take effect
-    // on the next daily batch without restarting the daemon.
-    const fresh = await loadConfig().catch(() => cfg);
-    const per = fresh.schedule?.releasesPerDay ?? 30;
-    const stagger = (fresh.schedule?.staggerMinutes ?? 40) * 60_000;
-    const cycle = (fresh.schedule?.intervalHours ?? 24) * 3600_000;
-    const start = Date.now();
-    log(`=== günlük döngü: ${per} release ===`);
-    for (let i = 0; i < per; i++) {
-      // reload config each release so panel edits (autoSubmit, kalite/vokal
-      // eşikleri, retention) canlı uygulanır — daemon'ı yeniden başlatmadan.
-      const c = await loadConfig().catch(() => cfg);
-      try { const r = await runOne(c); if (r.skipped) log(`  atlandı: ${r.reason}`); }
-      catch (e) { log('  hata:', e.message); }
-      if (i < per - 1) await sleep(stagger);
-    }
-    const wait = Math.max(0, cycle - (Date.now() - start));
-    log(`döngü bitti — ${Math.round(wait / 3600_000)} saat bekleniyor`);
-    await sleep(wait);
+  // Finite batch: `count` successful releases back-to-back, then STOP cleanly
+  // (the process exits; the panel keeps running and logs "işlem bitti").
+  log(`=== ${count} release (sırayla) ===`);
+  let done = 0;
+  while (done < count) {
+    cfg = await loadConfig().catch(() => cfg);
+    const rot = rebuild();
+    if (!rot.hasNext()) { log('kuyrukta işlenecek şarkı kalmadı — erken bitti'); break; }
+    let r; try { r = await runOne(cfg); } catch (e) { log('hata:', e.message); continue; }
+    if (r?.skipped) { log(`atlandı: ${r.reason}`); if (/boş/.test(r.reason)) break; } // covers/queue empty -> stop
+    else done++;
   }
+  log(`✔ işlem bitti — ${done}/${count} release tamamlandı`);
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
