@@ -84,13 +84,14 @@ export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
       if (i < 0 || artists.length === 0) return null;
       return { song: songs[i], artist: artists[state.artistIndex % artists.length] };
     },
-    /** Mark the current song done + advance the artist round-robin. Call only once
-     *  a release is fully handled. */
-    async commit() {
+    /** Mark the current song done. Advance the artist round-robin ONLY when a
+     *  release was actually produced — a skipped/failed song must not "use up" an
+     *  artist, so the next song keeps the same artist. */
+    async commit(released = true) {
       const i = firstPending();
       if (i >= 0) doneSet.add(songKey(songs[i]));
       state.done = [...doneSet];
-      state.artistIndex = artists.length ? (state.artistIndex + 1) % artists.length : 0;
+      if (released) state.artistIndex = artists.length ? (state.artistIndex + 1) % artists.length : 0;
       await saveState(stateDir, state);
     },
     /** peek + commit (legacy convenience). */

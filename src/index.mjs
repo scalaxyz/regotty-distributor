@@ -97,7 +97,7 @@ async function runOne(cfg) {
       gen = { itemId: gen.itemId, ...(await retryCover(cfg.regotty, gen.itemId, { retention, semantic: cfg.regotty.semantic })) };
     }
   }
-  if (!passed) { await cleanupItem(cfg.regotty, gen.itemId); await rm(tmp, { recursive: true, force: true }).catch(() => {}); await rotation.commit(); return { skipped: true, reason: `pencereye giremedi (risk=${lastRisk?.score}, ${[...(lastQ?.reasons || []), ...(lastV?.reasons || [])].join('; ') || 'ok'})` }; } // commit: unusable, move on
+  if (!passed) { await cleanupItem(cfg.regotty, gen.itemId); await rm(tmp, { recursive: true, force: true }).catch(() => {}); await rotation.commit(false); return { skipped: true, reason: `pencereye giremedi (risk=${lastRisk?.score}, ${[...(lastQ?.reasons || []), ...(lastV?.reasons || [])].join('; ') || 'ok'})` }; } // commit: unusable, move on
 
   // 2. release folder + 6-version pack. For an instrumental release the cover is
   //    already vocal-free (backend pulled the YouTube instrumental + ACE-Step
@@ -163,7 +163,7 @@ async function runOne(cfg) {
     log('  ↳ RouteNote yükleme hatası:', e.message);
   }
   await rm(tmp, { recursive: true, force: true }).catch(() => {}); // temp indirilenleri temizle
-  await rotation.commit(); // release handled (uploaded or gave up) — advance the queue
+  await rotation.commit(true); // release produced (package written) — advance song + artist
   return { dir, manifest, distributed };
 }
 
