@@ -5,7 +5,7 @@
 
 import { createServer } from 'node:http';
 import { readFile, writeFile, readdir, unlink, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,15 +43,18 @@ function spawnChild(kind, args) {
     // fail-fast that JS can't catch) shouldn't stop the night's run — auto-restart
     // it. The key-based rotation + persisted daily count resume where it left off.
     const crashed = code !== 0 && code !== null;
-    if (/^daemon/.test(kind) && crashed && !manualStop) {
+    // Daemon AND batch auto-restart on a native crash (torch fail-fast that JS can't
+    // catch). Key-based rotation + orphan cleanup + the batch's persisted remaining
+    // count mean it resumes where it left off rather than losing progress.
+    if (/^(daemon|batch)/.test(kind) && crashed && !manualStop) {
       if (Date.now() - lastStart > 5 * 60_000) restarts = 0; // ran a while -> fresh budget
       if (restarts < 30) {
         restarts++;
-        pushLog('↻ daemon çöktü (kod ' + code + ') — 5 sn sonra otomatik yeniden başlatılıyor (' + restarts + '. kez). Kaldığı yerden devam eder.');
+        pushLog('↻ ' + kind + ' çöktü (kod ' + code + ') — 5 sn sonra otomatik yeniden başlatılıyor (' + restarts + '. kez). Kaldığı yerden devam eder.');
         setTimeout(() => { if (!manualStop && !child) spawnChild(kind, args); }, 5000);
         return;
       }
-      pushLog('⚠ daemon çok kez üst üste çöktü — otomatik yeniden başlatma durduruldu. Elle başlat.');
+      pushLog('⚠ ' + kind + ' çok kez üst üste çöktü — otomatik yeniden başlatma durduruldu. Elle başlat.');
     }
     childKind = null;
   });
@@ -59,6 +62,8 @@ function spawnChild(kind, args) {
 function runChild(kind, args) {
   if (child) return { error: 'Zaten çalışan bir işlem var. Önce durdur.' };
   manualStop = false; restarts = 0;
+  // fresh, user-clicked batch -> not a crash-resume, so start the count from scratch
+  if (/^batch/.test(kind)) { try { unlinkSync(rel('state/batch-remaining.json')); } catch {} }
   spawnChild(kind, args);
   return { ok: true };
 }
@@ -100,7 +105,7 @@ async function status() {
   return {
     configExists: !!cfg, configReady,
     songsTotal, songsPending: Math.max(0, songsTotal - songsDone), songsDone, doneKeys: [...doneSet],
-    artists, artistCounts, covers: covers.length, coverNames: covers,
+    artists, artistCounts, artistMode: cfg?.artistMode === 'balance' ? 'balance' : 'order', covers: covers.length, coverNames: covers,
     loggedIn: existsSync(rel('state/routenote-session.json')),
     running: childKind, autoSubmit: cfg?.routenote?.autoSubmit === true,
     schedule: cfg?.schedule || null,
@@ -179,6 +184,14 @@ const server = createServer(async (req, res) => {
       await mkdir(rel('state'), { recursive: true });
       await writeFile(f, JSON.stringify(st, null, 2));
       pushLog('⚙ ' + nm + ' release sayısı = ' + n); return json(res, { ok: true });
+    }
+
+    if (p === '/api/artist-mode' && req.method === 'POST') {
+      const { mode } = JSON.parse(await body(req));
+      const m = mode === 'balance' ? 'balance' : 'order';
+      const cfg = await loadConfig(); cfg.artistMode = m;
+      await writeFile(rel('config/config.json'), JSON.stringify(cfg, null, 2));
+      pushLog('⚙ sanatçı dağıtımı = ' + (m === 'balance' ? 'eksik öncelikli' : 'sıralı')); return json(res, { ok: true, artistMode: m });
     }
 
     if (p === '/api/run' && req.method === 'POST') {
@@ -399,6 +412,12 @@ textarea:focus{outline:none;border-color:var(--line2);box-shadow:0 0 0 3px rgba(
 .cbadge.okf{border-color:var(--ok);box-shadow:0 0 0 2px rgba(52,211,153,.2)}
 .expbtn{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--mut);border-radius:9px;padding:8px 12px;font-size:13px;cursor:pointer}
 .expbtn:hover{color:var(--fg);border-color:var(--line2)}
+.modebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.modebar>span:first-child{color:var(--mut);font-size:13px;font-weight:600}
+.modeopt{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer}
+.modeopt:hover{color:var(--fg);border-color:var(--line2)}
+.modeopt.on{background:rgba(99,102,241,.16);border-color:var(--v);color:#c7ccff}
+.modehint{color:var(--dim);font-size:11.5px}
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
 .badge.done{color:var(--ok);border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
 .badge.wait{color:var(--warn);border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.07)}
@@ -548,10 +567,12 @@ function renderTableTab(name){
   var hints={queue:'Cover\\'lanacak kaynak şarkılar. <b>Orijinal sanatçı</b> © C-line\\'a girer; mashup ise iki isim virgülle. Link yapıştırırsan besteci+explicit tam o şarkıdan çekilir. <b>🎹 Enst.</b> tikliyse INSTRUMENTAL sürüm üretilir.',artists:'Dağıtım profillerin — release\\'ler sırayla döner. Sağdaki sayı = o sanatçıya giden release. <b class="behindtxt">Kırmızı</b> = eksik (diğerlerinden az). <b>▶ üret</b> ile o sanatçıya özel üretip eşitleyebilirsin (adet: üstteki Release kutusu).'};
   var ths='<th class="idx">#</th>'+t.cols.map(function(c){return '<th'+(c.type==='check'?' class="chk"':'')+(c.title?' title="'+esc(c.title)+'"':'')+'>'+(c.label||c.k.replace(/_/g,' '))+'</th>'}).join('')+(t.status?'<th class="st">Durum</th>':'')+'<th class="act"></th>';
   var lk=name==='queue'?'<div class="lookup"><span class="lki">'+IC.link+'</span><input id="lk" placeholder="Spotify şarkı linki yapıştır → sanatçı + şarkı otomatik dolar" onkeydown="if(event.key===\\'Enter\\'){event.preventDefault();lookupAdd()}"><button id="lkb" class="p" onclick="lookupAdd()">'+IC.link+'Çek</button></div>':'';
-  pn.innerHTML='<div class="hint">'+hints[name]+'</div>'+lk+'<div class="tblwrap"><table class="tbl"><thead><tr>'+ths+'</tr></thead><tbody id="tb"></tbody></table></div><div class="saverow"><button onclick="addRow()">+ Satır ekle</button><button class="p" onclick="saveTable()">'+IC.save+'Kaydet</button><button class="expbtn" onclick="toggleExpand(this)">⤢ Genişlet</button><span class="saved" id="sv">'+IC.check+'kaydedildi</span></div>';
+  var md=name==='artists'?'<div class="modebar"><span>Dağıtım:</span><button class="modeopt" data-m="order" onclick="setMode(\\'order\\')">↻ Sıralı döndür</button><button class="modeopt" data-m="balance" onclick="setMode(\\'balance\\')">⤵ Eksik öncelikli</button><span class="modehint">eksik öncelikli = en az release\\'i olana üretir, eşitleyene kadar</span></div>':'';
+  pn.innerHTML='<div class="hint">'+hints[name]+'</div>'+lk+md+'<div class="tblwrap"><table class="tbl"><thead><tr>'+ths+'</tr></thead><tbody id="tb"></tbody></table></div><div class="saverow"><button onclick="addRow()">+ Satır ekle</button><button class="p" onclick="saveTable()">'+IC.save+'Kaydet</button><button class="expbtn" onclick="toggleExpand(this)">⤢ Genişlet</button><span class="saved" id="sv">'+IC.check+'kaydedildi</span></div>';
   Promise.all([api('/api/file?name='+FNAME[name]),api('/api/status')]).then(function(a){
     doneCount=a[1].songsDone||0;doneKeys={};(a[1].doneKeys||[]).forEach(function(k){doneKeys[k]=1});
     artistCounts={};artistMax=0;(a[1].artistCounts||[]).forEach(function(x){artistCounts[x.name]=x.count;if(x.count>artistMax)artistMax=x.count});
+    var _m=a[1].artistMode||'order';document.querySelectorAll('.modeopt').forEach(function(b){b.classList.toggle('on',b.dataset.m===_m)});
     var rows=parseCsv(a[0].text,t.header);var tb=$('#tb');tb.innerHTML='';
     if(!rows.length){addRow();return;}
     rows.forEach(function(r,i){tb.appendChild(rowEl(name,r,i))});
@@ -590,6 +611,7 @@ function delCover(n){api('/api/cover?name='+encodeURIComponent(n),{method:'DELET
 function run(kind){var count=1;var bn=$('#batchN');if(bn&&kind.indexOf('batch')===0)count=Math.max(1,parseInt(bn.value,10)||1);api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,count:count})}).then(function(r){if(r.error)toast(r.error);refresh()})}
 function runArtist(btn){var tr=btn.closest('tr');var inp=tr.querySelector('input');var name=inp?inp.value.trim():'';if(!name){toast('önce sanatçı adını yaz');return}var count=1;var bn=$('#batchN');if(bn)count=Math.max(1,parseInt(bn.value,10)||1);if(!confirm(name+' için '+count+' release üretilecek (sırayla). Başlansın mı?'))return;api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'batch',count:count,artist:name})}).then(function(r){if(r.error){toast(r.error);return}toast(name+' için '+count+' release başladı');refresh()})}
 function toggleExpand(btn){var w=document.querySelector('.tblwrap');if(!w)return;var on=w.classList.toggle('expanded');btn.textContent=on?'⤡ Daralt':'⤢ Genişlet'}
+function setMode(m){api('/api/artist-mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:m})}).then(function(r){if(r&&r.error){toast(r.error);return}document.querySelectorAll('.modeopt').forEach(function(b){b.classList.toggle('on',b.dataset.m===m)});toast(m==='balance'?'Eksik sanatçılara öncelik verilecek':'Sanatçılar sırayla dönecek')})}
 function setArtistCount(inp){var tr=inp.closest('tr');var ni=tr.querySelector('input');var name=ni?ni.value.trim():'';if(!name){toast('önce sanatçı adını yaz');return}var count=Math.max(0,parseInt(inp.value,10)||0);inp.value=count;api('/api/artist-count',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,count:count})}).then(function(r){if(r&&r.error){toast(r.error);return}inp.classList.add('okf');setTimeout(function(){inp.classList.remove('okf')},900)})}
 function stop(){api('/api/stop',{method:'POST'}).then(refresh)}
 function setAuto(v){if(v&&!confirm('autoSubmit AÇILIYOR — üretilen release\\'ler otomatik YAYINA gönderilir. Emin misin?')){$('#auto').checked=false;return}api('/api/autosubmit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})}).then(refresh)}

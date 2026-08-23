@@ -215,6 +215,7 @@ async function main() {
       inputCsv: rel(cfg.paths.input),
       artistsCsv: rel(cfg.paths.artists),
       stateDir: rel(cfg.paths.state),
+      mode: cfg.artistMode === 'balance' ? 'balance' : 'order',
     });
     runOne._rotation = rot;
     return rot;
@@ -250,19 +251,27 @@ async function main() {
     }
   }
 
-  // Finite batch: `count` successful releases back-to-back, then STOP cleanly
-  // (the process exits; the panel keeps running and logs "işlem bitti").
-  log(`=== ${count} release (sırayla${forceArtist ? `, sanatçı: ${forceArtist}` : ''}) ===`);
+  // Finite batch: `count` successful releases back-to-back, then STOP cleanly.
+  // Resume support: a native crash + panel auto-restart continues the SAME batch
+  // (remaining count persisted) instead of restarting a fresh N. The panel clears
+  // this marker on a fresh, user-clicked run.
+  const remPath = rel(path.join(cfg.paths.state, 'batch-remaining.json'));
+  let target = count;
+  try { const rr = JSON.parse(await readFile(remPath, 'utf8')); if (typeof rr.remaining === 'number' && rr.remaining > 0) { target = rr.remaining; log(`(yarım kalan batch'ten devam — ${target} release kaldı)`); } } catch {}
+  await mkdir(rel(cfg.paths.state), { recursive: true }).catch(() => {});
+  await writeFile(remPath, JSON.stringify({ remaining: target })).catch(() => {});
+  log(`=== ${target} release (sırayla${forceArtist ? `, sanatçı: ${forceArtist}` : ''}) ===`);
   let done = 0;
-  while (done < count) {
+  while (done < target) {
     cfg = await loadConfig().catch(() => cfg);
     const rot = await rebuild();
     if (!rot.hasNext()) { log('kuyrukta işlenecek şarkı kalmadı — erken bitti'); break; }
     let r; try { r = await runOne(cfg, { forceArtist }); } catch (e) { log('hata:', e.message); continue; }
     if (r?.skipped) { log(`atlandı: ${r.reason}`); if (/boş/.test(r.reason)) break; } // covers/queue empty -> stop
-    else done++;
+    else { done++; await writeFile(remPath, JSON.stringify({ remaining: target - done })).catch(() => {}); }
   }
-  log(`✔ işlem bitti — ${done}/${count} release tamamlandı`);
+  await rm(remPath, { force: true }).catch(() => {}); // batch complete -> clear resume marker
+  log(`✔ işlem bitti — ${done}/${target} release tamamlandı`);
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {

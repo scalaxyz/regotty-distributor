@@ -9,6 +9,9 @@
     "staggerMinutes": 40
   },
 
+  "//artistMode": "Sanatci dagitimi: 'order' = sirayla dondur; 'balance' = en az release'i olan sanatciya oncelik (eksikleri esitler, sonra devam). Panel'deki Sanatcilar sekmesinden degistirilir.",
+  "artistMode": "order",
+
   "quality": {
     "//": "Risk skoru bu PENCEREDE olacak: minRiskScore <= risk < maxRiskScore (tanidik ama farkli).",
     "minRiskScore": 20,

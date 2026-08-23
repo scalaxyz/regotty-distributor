@@ -59,7 +59,7 @@ async function saveState(stateDir, state) {
  * Rotation over input.csv (songs, in order, resuming) and artists.csv (round-robin).
  * `next()` returns { song, artist } and advances + persists both cursors.
  */
-export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
+export async function createRotation({ inputCsv, artistsCsv, stateDir, mode = 'order' }) {
   const songs = await readCsv(inputCsv);
   const artists = await readCsv(artistsCsv);
   const state = await loadState(stateDir);
@@ -77,6 +77,19 @@ export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
     const n = String(name || '').trim().toLowerCase();
     return artists.find((a) => aname(a).toLowerCase() === n) || null;
   };
+  // Which artist gets the NEXT release:
+  //  - 'order'   : round-robin in list order (state.artistIndex)
+  //  - 'balance' : the artist with the FEWEST releases (ties -> earliest in list) —
+  //                fills the behind artists first, then round-robins once even.
+  const pickArtist = () => {
+    if (!artists.length) return null;
+    if (mode === 'balance') {
+      let best = artists[0], bc = state.counts[aname(artists[0])] || 0;
+      for (const a of artists) { const c = state.counts[aname(a)] || 0; if (c < bc) { best = a; bc = c; } }
+      return best;
+    }
+    return artists[state.artistIndex % artists.length];
+  };
 
   return {
     songsCount: songs.length,
@@ -91,7 +104,7 @@ export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
     peek() {
       const i = firstPending();
       if (i < 0 || artists.length === 0) return null;
-      return { song: songs[i], artist: artists[state.artistIndex % artists.length] };
+      return { song: songs[i], artist: pickArtist() };
     },
     /** Same, but force a specific artist (targeted "produce for this artist" runs). */
     peekFor(name) {
@@ -108,9 +121,11 @@ export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
       if (i >= 0) doneSet.add(songKey(songs[i]));
       state.done = [...doneSet];
       if (released) {
-        const name = forcedArtist ? aname(findArtist(forcedArtist)) : aname(artists[state.artistIndex % artists.length]);
+        // credit the SAME artist peek() chose (counts don't change between peek+commit)
+        const name = forcedArtist ? aname(findArtist(forcedArtist)) : aname(pickArtist());
         if (name) state.counts[name] = (state.counts[name] || 0) + 1;
-        if (!forcedArtist) state.artistIndex = artists.length ? (state.artistIndex + 1) % artists.length : 0;
+        // advance the round-robin cursor only in order mode (balance picks by count)
+        if (!forcedArtist && mode !== 'balance') state.artistIndex = artists.length ? (state.artistIndex + 1) % artists.length : 0;
       }
       await saveState(stateDir, state);
     },
