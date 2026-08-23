@@ -165,13 +165,14 @@ async function main() {
   let cfg = await loadConfig();
   // Reload config + rebuild the rotation before each release so panel edits (queue
   // songs, daily target, thresholds, autoSubmit) apply live without a restart.
-  const rebuild = () => {
-    runOne._rotation = createRotation({
+  const rebuild = async () => {
+    const rot = await createRotation({
       inputCsv: rel(cfg.paths.input),
       artistsCsv: rel(cfg.paths.artists),
       stateDir: rel(cfg.paths.state),
     });
-    return runOne._rotation;
+    runOne._rotation = rot;
+    return rot;
   };
 
   const daemon = process.argv.includes('--daemon');
@@ -187,7 +188,7 @@ async function main() {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       cfg = await loadConfig().catch(() => cfg);
-      const rot = rebuild();
+      const rot = await rebuild();
       const per = Math.max(1, cfg.schedule?.releasesPerDay ?? 10);
       if (rot.releasedToday() >= per) {
         const d = localDay();
@@ -208,7 +209,7 @@ async function main() {
   let done = 0;
   while (done < count) {
     cfg = await loadConfig().catch(() => cfg);
-    const rot = rebuild();
+    const rot = await rebuild();
     if (!rot.hasNext()) { log('kuyrukta işlenecek şarkı kalmadı — erken bitti'); break; }
     let r; try { r = await runOne(cfg); } catch (e) { log('hata:', e.message); continue; }
     if (r?.skipped) { log(`atlandı: ${r.reason}`); if (/boş/.test(r.reason)) break; } // covers/queue empty -> stop
