@@ -147,9 +147,10 @@ export async function checkVocals(file, cfg = {}) {
       reasons.push(`vokal neredeyse yok (ort ${dem.vocalRatioDb}dB < ${minMean})`);
   }
 
-  // Whisper — intelligibility (words swallowed / garbled). Note: on a buried
-  // vocal Whisper hallucinates lyrics, so this backs up demucs, it doesn't replace it.
-  const asr = await whisperMetrics(file, cfg).catch(() => null);
+  // Whisper — OFF by default (opt in with vocalCheck.useWhisper). demucs already
+  // catches buried vocals reliably; whisper is slow AND hallucinates lyrics on a
+  // buried take, so it's an optional extra signal, not the primary check.
+  const asr = cfg.useWhisper ? await whisperMetrics(file, cfg).catch(() => null) : null;
   if (asr) {
     sources.push('whisper');
     if (asr.wpm < (cfg.minWordsPerMin ?? 12)) reasons.push(`çok az kelime okunuyor (${asr.wpm}/dk) — sözler yutuluyor olabilir`);

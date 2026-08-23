@@ -76,13 +76,19 @@ async function runOne(cfg) {
     await downloadAudio(gen.sourceUrl, sourceFile).catch(() => { sourceFile = null; });
     lastRisk = sourceFile ? await computeRisk(sourceFile, coverFile) : { score: 0 };
     lastQ = await checkQuality(coverFile, cfg.quality);
-    lastV = instrumental
-      ? { pass: true, reasons: [], metrics: {}, source: 'instrumental (vokal atlandı)' }
-      : await checkVocals(coverFile, cfg.vocalCheck || {});
     const riskOk = lastRisk.score >= rMin && lastRisk.score < rMax;
-    log(`  risk=${lastRisk.score} (hedef ${rMin}-${rMax}) ret=${retention.toFixed(2)} kalite=${lastQ.pass ? 'ok' : 'X'} vokal=${lastV.pass ? 'ok' : 'X'}(${lastV.source})`);
+    // Only run the SLOW vocal check (demucs+whisper, ~1-1.5 min) when risk+quality
+    // already pass — otherwise we're re-rolling this take anyway, so skip it.
+    if (riskOk && lastQ.pass) {
+      lastV = instrumental
+        ? { pass: true, reasons: [], metrics: {}, source: 'instrumental (vokal atlandı)' }
+        : await checkVocals(coverFile, cfg.vocalCheck || {});
+    } else {
+      lastV = { pass: false, reasons: [], metrics: {}, source: 'atlandı' };
+    }
+    log(`  risk=${lastRisk.score} (hedef ${rMin}-${rMax}) ret=${retention.toFixed(2)} kalite=${lastQ.pass ? 'ok' : 'X'} vokal=${lastV.source === 'atlandı' ? '—' : (lastV.pass ? 'ok' : 'X')}(${lastV.source})`);
     if (!lastQ.pass) log(`    kalite: ${lastQ.reasons.join('; ')}`);
-    if (!lastV.pass) log(`    vokal: ${lastV.reasons.join('; ')}`);
+    if (!lastV.pass && lastV.reasons.length) log(`    vokal: ${lastV.reasons.join('; ')}`);
     if (riskOk && lastQ.pass && lastV.pass) { passed = true; break; }
     if (attempt < maxRetries) {
       if (lastRisk.score < rMin) retention = Math.min(retMax, +(retention + retStep).toFixed(3));       // too different -> nudge toward source

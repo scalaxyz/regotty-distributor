@@ -100,7 +100,7 @@ async function status() {
     loggedIn: existsSync(rel('state/routenote-session.json')),
     running: childKind, autoSubmit: cfg?.routenote?.autoSubmit === true,
     schedule: cfg?.schedule || null,
-    vocalMode: cfg?.vocalCheck?.enabled === false ? 'off' : (whisperReady ? 'whisper' : 'muffle'),
+    vocalMode: cfg?.vocalCheck?.enabled === false ? 'off' : (cfg?.vocalCheck?.useWhisper ? 'demucs+whisper' : 'demucs'),
   };
 }
 
@@ -461,7 +461,7 @@ function countUp(el,to){var from=+el.dataset.v||0;if(from===to){el.textContent=t
 var STAT=[['disc','songsPending','Bekleyen şarkı','songsTotal'],['mic','artists','Sanatçı profili',null],['img','covers','Hazır kapak',null],['loop','_daily','Günlük hedef',null,1]];
 var built=false;
 function refresh(){api('/api/status').then(function(s){
-  var pills=[['RouteNote',s.loggedIn?'giriş yapıldı':'giriş yok',s.loggedIn?'on':'off'],['Ayar',s.configReady?'hazır':'eksik',s.configReady?'on':'off'],['Durum',s.running?('çalışıyor · '+s.running):'boşta',s.running?'run':''],['autoSubmit',s.autoSubmit?'AÇIK':'kapalı',s.autoSubmit?'run':''],['Vokal',s.vocalMode==='whisper'?'kelime kontrolü':(s.vocalMode==='off'?'kapalı':'muffle'),s.vocalMode==='whisper'?'on':'']];
+  var pills=[['RouteNote',s.loggedIn?'giriş yapıldı':'giriş yok',s.loggedIn?'on':'off'],['Ayar',s.configReady?'hazır':'eksik',s.configReady?'on':'off'],['Durum',s.running?('çalışıyor · '+s.running):'boşta',s.running?'run':''],['autoSubmit',s.autoSubmit?'AÇIK':'kapalı',s.autoSubmit?'run':''],['Vokal',s.vocalMode==='off'?'kapalı':s.vocalMode,s.vocalMode==='off'?'':'on']];
   $('#pills').innerHTML=pills.map(function(p){return '<span class="pill '+p[2]+'"><span class="d"></span><b style="color:inherit;font-weight:600">'+p[0]+'</b> '+p[1]+'</span>'}).join('');
   s._daily=s.schedule?s.schedule.releasesPerDay:0;
   var _per=s._daily;

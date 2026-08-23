@@ -17,12 +17,14 @@
     "maxLoudnessDb": -6,
     "minDurationSec": 30,
     "requireNotSilent": true,
-    "maxRetries": 5
+    "maxRetries": 3
   },
 
   "vocalCheck": {
-    "//": "Vokal/lyrics anlasilirligi. Whisper varsa kelimeleri desifre edip olcer; yoksa ffmpeg muffle kontrolune duser.",
+    "//": "Vokal kontrolu. Ana kontrol demucs (vokal beatin altinda mi). Whisper opsiyonel.",
     "enabled": true,
+    "//useWhisper": "false = sadece demucs (hizli+guvenilir). true = whisper'i da calistir (yavas, dipte lyrics uydurabilir).",
+    "useWhisper": false,
     "whisperCmd": "auto",
     "model": "base",
     "language": "en",
