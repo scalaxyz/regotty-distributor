@@ -82,6 +82,7 @@ npm run login                 # RouteNote'a giriş (Chrome açılır, captcha ot
 npm start                     # 1 release üret → TASLAK
 npm start -- --count 9        # 9 release SIRAYLA üret → sonra durur ("işlem bitti")
 npm start -- --count 9 --publish   # 9 release sırayla → her birini YAYINLA, sonra durur
+npm start -- --count 3 --artist "Ozravia"   # 3 release'i HEP bu sanatçıya (dengeleme için)
 npm run daemon                # günlük hedef kadar sırayla üret, sonra ertesi gün; kuyruk bitene dek (taslak)
 npm run daemon -- --publish   # ... her birini otomatik yayınla
 ```

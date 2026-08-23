@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * Generate a cover for (artist, song). Resolves when the take is ready.
  * Returns { itemId, coverUrl, sourceUrl }. Throws on failure/timeout.
  */
-export async function generateCover(cfg, artist, song, { retention, instrumental = false, timeoutMs = 20 * 60_000, pollMs = 5000 } = {}) {
+export async function generateCover(cfg, artist, song, { retention, instrumental = false, timeoutMs = 20 * 60_000, pollMs = 5000, onProgress, onItemCreated } = {}) {
   // instrumental:true => backend YouTube'da "<artist> <song> instrumental" arar ve
   // ACE-Step'e --instrumental verir (sözsüz üretir). Ayrı bir vokal-ayırma gerekmez.
   const { item } = await api(cfg, '/api/automation/queue', {
@@ -31,17 +31,20 @@ export async function generateCover(cfg, artist, song, { retention, instrumental
     body: { artist, title: song, instrumental, sourcePref: instrumental ? 'auto' : 'lyrics' },
   });
   const id = item.id;
+  if (onItemCreated) await onItemCreated(id).catch(() => {}); // track for orphan cleanup on crash
   await api(cfg, '/api/automation/run', {
     method: 'POST',
     body: { itemIds: [id], mode: 'selected', retention: retention ?? cfg.retention, semantic: cfg.semantic, model: cfg.model },
   });
 
-  const deadline = Date.now() + timeoutMs;
+  const start = Date.now();
+  const deadline = start + timeoutMs;
   while (Date.now() < deadline) {
     await sleep(pollMs);
     const { items } = await api(cfg, '/api/automation/queue');
     const row = items.find((x) => x.id === id);
     if (!row) throw new Error('kuyruk öğesi kayboldu');
+    if (onProgress) onProgress({ status: row.status, progress: row.progress, step: row.step, elapsedMs: Date.now() - start });
     if (row.status === 'review' && row.last_audio_url) {
       return { itemId: id, coverUrl: abs(cfg, row.last_audio_url), sourceUrl: abs(cfg, row.last_source_url) };
     }
@@ -51,13 +54,15 @@ export async function generateCover(cfg, artist, song, { retention, instrumental
 }
 
 /** Ask the backend to regenerate the current take (optionally with new params). */
-export async function retryCover(cfg, itemId, override) {
+export async function retryCover(cfg, itemId, override, { onProgress } = {}) {
   await api(cfg, `/api/automation/queue/${itemId}/retry`, { method: 'POST', body: override || {} });
-  const deadline = Date.now() + 20 * 60_000;
+  const start = Date.now();
+  const deadline = start + 20 * 60_000;
   while (Date.now() < deadline) {
     await sleep(5000);
     const { items } = await api(cfg, '/api/automation/queue');
     const row = items.find((x) => x.id === itemId);
+    if (onProgress && row) onProgress({ status: row.status, progress: row.progress, step: row.step, elapsedMs: Date.now() - start });
     if (row?.status === 'review' && row.last_audio_url) return { coverUrl: abs(cfg, row.last_audio_url), sourceUrl: abs(cfg, row.last_source_url) };
     if (row?.status === 'failed') throw new Error(`tekrar üretim başarısız: ${row.error || '?'}`);
   }

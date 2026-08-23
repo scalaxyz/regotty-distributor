@@ -87,16 +87,20 @@ async function status() {
   const artists = Math.max(0, await csvCount(rel('artists/artists.csv')));
   const covers = (await readdir(rel('covers')).catch(() => [])).filter((f) => /\.(jpe?g|png)$/i.test(f));
   // done tracked by song identity (artist+song), not position — see csv.mjs
-  let doneList = []; try { const st = JSON.parse(await readFile(rel('state/rotation.json'), 'utf8')); if (Array.isArray(st.done)) doneList = st.done; } catch {}
+  let doneList = [], counts = {};
+  try { const st = JSON.parse(await readFile(rel('state/rotation.json'), 'utf8')); if (Array.isArray(st.done)) doneList = st.done; if (st.counts && typeof st.counts === 'object') counts = st.counts; } catch {}
   const doneSet = new Set(doneList);
   const songsTotal = rows.length;
   const songsDone = rows.filter((r) => doneSet.has(songKey(r))).length;
+  // per-artist release tally (which artists are behind, for balancing)
+  let artistRows = []; try { artistRows = await readCsv(rel('artists/artists.csv')); } catch {}
+  const artistCounts = artistRows.map((a) => ({ name: a.artist_name, count: counts[String(a.artist_name || '').trim()] || 0 }));
   const isPlaceholder = (v) => !v || /[<>]|BURAYA|^\.{3}$/.test(String(v));
   const configReady = !!cfg && [cfg.regotty?.token, cfg.routenote?.login?.username, cfg.routenote?.login?.password, cfg.routenote?.captcha?.apiKey, cfg.routenote?.uid].every((v) => !isPlaceholder(v));
   return {
     configExists: !!cfg, configReady,
     songsTotal, songsPending: Math.max(0, songsTotal - songsDone), songsDone, doneKeys: [...doneSet],
-    artists, covers: covers.length, coverNames: covers,
+    artists, artistCounts, covers: covers.length, coverNames: covers,
     loggedIn: existsSync(rel('state/routenote-session.json')),
     running: childKind, autoSubmit: cfg?.routenote?.autoSubmit === true,
     schedule: cfg?.schedule || null,
@@ -164,12 +168,13 @@ const server = createServer(async (req, res) => {
     }
 
     if (p === '/api/run' && req.method === 'POST') {
-      const { kind, count } = JSON.parse(await body(req));
+      const { kind, count, artist } = JSON.parse(await body(req));
       const n = Math.max(1, Math.min(999, parseInt(count, 10) || 1));
+      const art = artist ? ['--artist', String(artist)] : []; // targeted: all releases -> this artist
       const map = {
         login: ['src/routenote.mjs', 'login'],
-        batch: ['src/index.mjs', '--count', String(n)],
-        'batch-publish': ['src/index.mjs', '--count', String(n), '--publish'],
+        batch: ['src/index.mjs', '--count', String(n), ...art],
+        'batch-publish': ['src/index.mjs', '--count', String(n), ...art, '--publish'],
         daemon: ['src/index.mjs', '--daemon'],
         'daemon-publish': ['src/index.mjs', '--daemon', '--publish'],
       };
@@ -365,6 +370,12 @@ textarea:focus{outline:none;border-color:var(--line2);box-shadow:0 0 0 3px rgba(
 .tbl .cell.chk input[type=checkbox]{width:19px;height:19px;accent-color:#1db954;cursor:pointer;margin:0;vertical-align:middle}
 .tbl .st{width:96px;padding-right:10px}
 .tbl .act{width:40px}
+.tbl .act.artistact{width:auto;white-space:nowrap;text-align:right;padding-right:10px}
+.cbadge{display:inline-block;min-width:22px;text-align:center;padding:3px 8px;border-radius:8px;background:rgba(255,255,255,.06);color:var(--dim);font:600 12px 'JetBrains Mono',monospace;border:1px solid var(--line);vertical-align:middle}
+.cbadge.behind{background:rgba(251,113,133,.15);color:#ffb3bd;border-color:rgba(251,113,133,.45)}
+.mk{margin:0 8px;background:rgba(29,185,84,.12);color:#57e08b;border:1px solid rgba(29,185,84,.35);border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;vertical-align:middle}
+.mk:hover{background:rgba(29,185,84,.22)}
+.behindtxt{color:#ffb3bd}
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
 .badge.done{color:var(--ok);border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
 .badge.wait{color:var(--warn);border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.07)}
@@ -487,7 +498,7 @@ $('#tabs').innerHTML=Object.keys(TABS).map(function(k){return '<div class="tab" 
 $('#tabs').onclick=function(e){var t=e.target.closest('.tab');if(t){tab=t.dataset.k;renderTab()}};
 var FNAME={queue:'input',artists:'artists',config:'config'};
 var TABLES={queue:{cols:[{k:'artist',ph:'Orijinal sanatçı (© C-line)'},{k:'song',ph:'Şarkı adı'},{k:'url',ph:'Spotify link (opsiyonel)',mono:true},{k:'instrumental',type:'check',label:'🎹 Enst.',title:'İşaretliyse bu şarkının INSTRUMENTAL versiyonu üretilir (vokal ayrılıp çıkarılır), "... - Instrumental" diye isimlenir.'}],status:true,header:['artist','song','url','instrumental']},artists:{cols:[{k:'artist_name',ph:'Profil adı'},{k:'spotify_url',ph:'https://open.spotify.com/artist/…',mono:true}],status:false,header:['artist_name','spotify_url']}};
-var doneCount=0;var doneKeys={};
+var doneCount=0;var doneKeys={};var artistCounts={};var artistMax=0;
 function qkey(a,s){return String(a==null?'':a).trim().toLowerCase()+'|'+String(s==null?'':s).trim().toLowerCase()}
 function csvSplit(line){var o=[],c='',q=false;for(var i=0;i<line.length;i++){var ch=line[i];if(q){if(ch==='"'&&line[i+1]==='"'){c+='"';i++}else if(ch==='"'){q=false}else c+=ch}else if(ch==='"')q=true;else if(ch===','){o.push(c);c=''}else c+=ch}o.push(c);return o.map(function(s){return s.trim()})}
 function parseCsv(text,header){var lines=String(text||'').split(/\\r?\\n/).filter(function(l){return l.trim()!==''});if(!lines.length)return [];var start=(lines[0]&&csvSplit(lines[0])[0].toLowerCase()===header[0].toLowerCase())?1:0;return lines.slice(start).map(csvSplit)}
@@ -507,12 +518,14 @@ function renderTab(){
 }
 function renderTableTab(name){
   var pn=$('#panel');var t=TABLES[name];
-  var hints={queue:'Cover\\'lanacak kaynak şarkılar. <b>Orijinal sanatçı</b> © C-line\\'a girer; mashup ise iki isim virgülle. Link yapıştırırsan besteci+explicit tam o şarkıdan çekilir. <b>🎹 Enst.</b> tikliyse INSTRUMENTAL sürüm üretilir.',artists:'Senin dağıtım profillerin — sırayla döner. Her satır bir profil.'};
+  var hints={queue:'Cover\\'lanacak kaynak şarkılar. <b>Orijinal sanatçı</b> © C-line\\'a girer; mashup ise iki isim virgülle. Link yapıştırırsan besteci+explicit tam o şarkıdan çekilir. <b>🎹 Enst.</b> tikliyse INSTRUMENTAL sürüm üretilir.',artists:'Dağıtım profillerin — release\\'ler sırayla döner. Sağdaki sayı = o sanatçıya giden release. <b class="behindtxt">Kırmızı</b> = eksik (diğerlerinden az). <b>▶ üret</b> ile o sanatçıya özel üretip eşitleyebilirsin (adet: üstteki Release kutusu).'};
   var ths='<th class="idx">#</th>'+t.cols.map(function(c){return '<th'+(c.type==='check'?' class="chk"':'')+(c.title?' title="'+esc(c.title)+'"':'')+'>'+(c.label||c.k.replace(/_/g,' '))+'</th>'}).join('')+(t.status?'<th class="st">Durum</th>':'')+'<th class="act"></th>';
   var lk=name==='queue'?'<div class="lookup"><span class="lki">'+IC.link+'</span><input id="lk" placeholder="Spotify şarkı linki yapıştır → sanatçı + şarkı otomatik dolar" onkeydown="if(event.key===\\'Enter\\'){event.preventDefault();lookupAdd()}"><button id="lkb" class="p" onclick="lookupAdd()">'+IC.link+'Çek</button></div>':'';
   pn.innerHTML='<div class="hint">'+hints[name]+'</div>'+lk+'<div class="tblwrap"><table class="tbl"><thead><tr>'+ths+'</tr></thead><tbody id="tb"></tbody></table></div><div class="saverow"><button onclick="addRow()">+ Satır ekle</button><button class="p" onclick="saveTable()">'+IC.save+'Kaydet</button><span class="saved" id="sv">'+IC.check+'kaydedildi</span></div>';
   Promise.all([api('/api/file?name='+FNAME[name]),api('/api/status')]).then(function(a){
-    doneCount=a[1].songsDone||0;doneKeys={};(a[1].doneKeys||[]).forEach(function(k){doneKeys[k]=1});var rows=parseCsv(a[0].text,t.header);var tb=$('#tb');tb.innerHTML='';
+    doneCount=a[1].songsDone||0;doneKeys={};(a[1].doneKeys||[]).forEach(function(k){doneKeys[k]=1});
+    artistCounts={};artistMax=0;(a[1].artistCounts||[]).forEach(function(x){artistCounts[x.name]=x.count;if(x.count>artistMax)artistMax=x.count});
+    var rows=parseCsv(a[0].text,t.header);var tb=$('#tb');tb.innerHTML='';
     if(!rows.length){addRow();return;}
     rows.forEach(function(r,i){tb.appendChild(rowEl(name,r,i))});
   });
@@ -524,7 +537,13 @@ function rowEl(name,vals,i){
     if(c.type==='check'){var on=/^(1|yes|true|evet|x|on)$/i.test(String(vals[ci]||'').trim());return '<td class="cell chk"'+(c.title?' title="'+esc(c.title)+'"':'')+'><input type="checkbox" data-k="'+esc(c.k)+'"'+(on?' checked':'')+'></td>'}
     return '<td class="cell'+(c.mono?' mono':'')+'"><input value="'+esc(vals[ci]||'').replace(/"/g,'&quot;')+'" placeholder="'+esc(c.ph)+'"></td>'}).join('');
   if(t.status){var done=(name==='queue'&&!!doneKeys[qkey(vals[0],vals[1])]);cells+='<td class="st"><span class="badge '+(done?'done':'wait')+'"><span class="d"></span>'+(done?'işlendi':'sırada')+'</span></td>'}
-  cells+='<td class="act"><button class="del" title="sil" onclick="this.closest(\\'tr\\').remove()">✕</button></td>';
+  if(name==='artists'){var an=(vals[0]||'').trim();var cnt=(an&&artistCounts[an]!=null)?artistCounts[an]:0;var behind=(artistMax>0&&cnt<artistMax);
+    cells+='<td class="act artistact"><span class="cbadge'+(behind?' behind':'')+'" title="bu sanatçıya giden release sayısı'+(behind?' — eksik!':'')+'">'+cnt+'</span>'
+      +'<button class="mk" title="Bu sanatçıya üret (üstteki Release sayısı kadar). Eksik sanatçıları eşitlemek için." onclick="runArtist(this)">▶ üret</button>'
+      +'<button class="del" title="sil" onclick="this.closest(\\'tr\\').remove()">✕</button></td>';
+  } else {
+    cells+='<td class="act"><button class="del" title="sil" onclick="this.closest(\\'tr\\').remove()">✕</button></td>';
+  }
   tr.innerHTML=cells;return tr;
 }
 function addRow(){var tb=$('#tb');if(!tb)return;var tr=rowEl(tab,[],tb.querySelectorAll('tr').length);tb.appendChild(tr);var inp=tr.querySelector('input');if(inp)inp.focus()}
@@ -542,6 +561,7 @@ function loadCovers(names){var c=$('#covs');if(!c)return;c.innerHTML=(names||[])
 function upload(files){var q=[];for(var i=0;i<files.length;i++)(function(f){q.push(new Promise(function(res){var fr=new FileReader();fr.onload=function(){api('/api/cover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:f.name,data:fr.result})}).then(res)};fr.readAsDataURL(f)}))})(files[i]);Promise.all(q).then(refresh)}
 function delCover(n){api('/api/cover?name='+encodeURIComponent(n),{method:'DELETE'}).then(refresh)}
 function run(kind){var count=1;var bn=$('#batchN');if(bn&&kind.indexOf('batch')===0)count=Math.max(1,parseInt(bn.value,10)||1);api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,count:count})}).then(function(r){if(r.error)toast(r.error);refresh()})}
+function runArtist(btn){var tr=btn.closest('tr');var inp=tr.querySelector('input');var name=inp?inp.value.trim():'';if(!name){toast('önce sanatçı adını yaz');return}var count=1;var bn=$('#batchN');if(bn)count=Math.max(1,parseInt(bn.value,10)||1);if(!confirm(name+' için '+count+' release üretilecek (sırayla). Başlansın mı?'))return;api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'batch',count:count,artist:name})}).then(function(r){if(r.error){toast(r.error);return}toast(name+' için '+count+' release başladı');refresh()})}
 function stop(){api('/api/stop',{method:'POST'}).then(refresh)}
 function setAuto(v){if(v&&!confirm('autoSubmit AÇILIYOR — üretilen release\\'ler otomatik YAYINA gönderilir. Emin misin?')){$('#auto').checked=false;return}api('/api/autosubmit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})}).then(refresh)}
 function sizeDaily(){var de=$('#daily');if(de)de.style.width=(((''+de.value).length||1)+0.3)+'ch'}

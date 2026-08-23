@@ -4,9 +4,9 @@ node_modules/
 # GİZLİ — secret'lar (JWT, RouteNote şifresi, CapSolver key)
 config/config.json
 
-# KİŞİYE ÖZEL veri (senin şarkı listen / dağıtım profillerin) — örnekleri (.example) tutulur
-input/input.csv
-artists/artists.csv
+# KİŞİYE ÖZEL veri (senin şarkı listen / dağıtım profillerin + kopyaları) — örnekleri (.example) tutulur
+input/*.csv
+artists/*.csv
 
 # çalışma zamanı çıktıları / oturum (RouteNote cookie'leri!)
 state/

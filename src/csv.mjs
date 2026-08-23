@@ -68,14 +68,23 @@ export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
   // re-doing others. Old positional state (inputIndex) can't be mapped to the
   // current (possibly edited) list, so it's dropped.
   if (!Array.isArray(state.done)) state.done = [];
+  if (!state.counts || typeof state.counts !== 'object') state.counts = {}; // per-artist release tally
   if (state.inputIndex != null) delete state.inputIndex;
   const doneSet = new Set(state.done);
   const firstPending = () => songs.findIndex((s) => !doneSet.has(songKey(s)));
+  const aname = (a) => String(a?.artist_name || '').trim();
+  const findArtist = (name) => {
+    const n = String(name || '').trim().toLowerCase();
+    return artists.find((a) => aname(a).toLowerCase() === n) || null;
+  };
 
   return {
     songsCount: songs.length,
     artistsCount: artists.length,
     doneKeys: () => [...doneSet],
+    /** How many releases each artist has received so far (0 for the untouched). */
+    counts() { const c = {}; for (const a of artists) c[aname(a)] = state.counts[aname(a)] || 0; return c; },
+    findArtist,
     hasNext: () => firstPending() >= 0 && artists.length > 0,
     /** First not-yet-done song (list order) + current artist, WITHOUT advancing —
      *  so an interrupted/crashed release is retried from the same spot, not skipped. */
@@ -84,14 +93,25 @@ export async function createRotation({ inputCsv, artistsCsv, stateDir }) {
       if (i < 0 || artists.length === 0) return null;
       return { song: songs[i], artist: artists[state.artistIndex % artists.length] };
     },
-    /** Mark the current song done. Advance the artist round-robin ONLY when a
-     *  release was actually produced — a skipped/failed song must not "use up" an
-     *  artist, so the next song keeps the same artist. */
-    async commit(released = true) {
+    /** Same, but force a specific artist (targeted "produce for this artist" runs). */
+    peekFor(name) {
+      const i = firstPending();
+      const a = findArtist(name);
+      if (i < 0 || !a) return null;
+      return { song: songs[i], artist: a };
+    },
+    /** Mark the current song done. On a real release, tally it to the credited artist
+     *  (forcedArtist for targeted runs, else the round-robin one) and advance the
+     *  round-robin ONLY when not forced. A skipped/failed song never "uses up" an artist. */
+    async commit(released = true, forcedArtist = null) {
       const i = firstPending();
       if (i >= 0) doneSet.add(songKey(songs[i]));
       state.done = [...doneSet];
-      if (released) state.artistIndex = artists.length ? (state.artistIndex + 1) % artists.length : 0;
+      if (released) {
+        const name = forcedArtist ? aname(findArtist(forcedArtist)) : aname(artists[state.artistIndex % artists.length]);
+        if (name) state.counts[name] = (state.counts[name] || 0) + 1;
+        if (!forcedArtist) state.artistIndex = artists.length ? (state.artistIndex + 1) % artists.length : 0;
+      }
       await saveState(stateDir, state);
     },
     /** peek + commit (legacy convenience). */
