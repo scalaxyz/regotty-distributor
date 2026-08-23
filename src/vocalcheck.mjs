@@ -120,7 +120,7 @@ async function whisperMetrics(file, cfg) {
  * Decide whether the vocals read the lyrics clearly.
  * Returns { pass, reasons[], metrics, source: 'whisper'|'heuristic'|'off' }.
  */
-export async function checkVocals(file, cfg = {}) {
+export async function checkVocals(file, cfg = {}, { origPeak = null } = {}) {
   if (cfg.enabled === false) return { pass: true, skipped: true, reasons: [], metrics: {}, source: 'off' };
   const reasons = [];
 
@@ -130,20 +130,31 @@ export async function checkVocals(file, cfg = {}) {
 
   const sources = [];
 
-  // Demucs — the reliable "is the vocal buried under the beat" measure.
+  // Demucs — the reliable "is the vocal buried under the beat" measure. Peak ratio
+  // is the robust discriminator: the MEAN is dragged down by pauses between phrases,
+  // but at its loudest the vocal should sit near the beat. A buried vocal peaks well
+  // below it.
   const dem = await demucsMetrics(file, cfg).catch(() => null);
   if (dem) {
     sources.push('demucs');
-    // Peak ratio is the robust discriminator: the vocal's MEAN is dragged down by
-    // the pauses between phrases, but at its loudest the vocal should sit near the
-    // beat (peak ratio ~0). A buried vocal peaks well below the beat. Calibrated on
-    // a known-buried take: peak −6.6dB, mean −10.3dB. Mean is kept only as a
-    // near-absent backstop.
-    const minPeak = cfg.minVocalPeakRatioDb ?? -4;
+    const cover = dem.vocalPeakRatioDb;
     const minMean = cfg.minVocalRatioDb ?? -18;
-    if (dem.vocalPeakRatioDb != null && dem.vocalPeakRatioDb < minPeak)
-      reasons.push(`vokal beatin altında/dipte (tepe ${dem.vocalPeakRatioDb}dB < ${minPeak})`);
-    else if (dem.vocalRatioDb != null && dem.vocalRatioDb < minMean)
+    const tol = cfg.vocalToleranceDb ?? 4;
+    if (origPeak != null) {
+      // RELATIVE gate: judge against the ORIGINAL's own vocal level. A song whose
+      // original vocal is naturally quiet shouldn't be rejected for matching it —
+      // only reject if the cover buries the vocal much MORE than the original (absurd).
+      dem.origPeak = origPeak;
+      if (cover != null && cover < origPeak - tol)
+        reasons.push(`vokal orijinalinden çok daha dipte (cover ${cover}dB, orijinal ${origPeak}dB, fark >${tol})`);
+    } else {
+      // No reference (source unavailable) -> fixed floor.
+      const minPeak = cfg.minVocalPeakRatioDb ?? -4;
+      if (cover != null && cover < minPeak)
+        reasons.push(`vokal beatin altında/dipte (tepe ${cover}dB < ${minPeak})`);
+    }
+    // Absolute "almost no vocal" backstop, regardless of the reference.
+    if (dem.vocalRatioDb != null && dem.vocalRatioDb < minMean)
       reasons.push(`vokal neredeyse yok (ort ${dem.vocalRatioDb}dB < ${minMean})`);
   }
 
@@ -161,6 +172,13 @@ export async function checkVocals(file, cfg = {}) {
 
   const source = sources.length ? sources.join('+') : 'heuristic';
   return { pass: reasons.length === 0, reasons, metrics: { ...muf, ...(dem || {}), ...(asr || {}) }, source };
+}
+
+/** The ORIGINAL/source track's vocal-peak ratio (demucs) — the reference the cover
+ *  is judged against. null if demucs isn't installed / fails. */
+export async function sourceVocalPeak(file, cfg = {}) {
+  const dem = await demucsMetrics(file, cfg).catch(() => null);
+  return dem?.vocalPeakRatioDb ?? null;
 }
 
 // CLI: node src/vocalcheck.mjs <file>

@@ -14,7 +14,7 @@ import { pickCover, consumeCover } from './covers.mjs';
 import { generateCover, retryCover, cleanupItem, downloadAudio } from './regotty.mjs';
 import { computeRisk } from './risk.mjs';
 import { checkQuality } from './quality.mjs';
-import { checkVocals } from './vocalcheck.mjs';
+import { checkVocals, sourceVocalPeak } from './vocalcheck.mjs';
 import { getComposer } from './credits.mjs';
 import { renderPack } from './render.mjs';
 import { ensureSession } from './routenote.mjs';
@@ -98,6 +98,7 @@ async function runOne(cfg, { forceArtist } = {}) {
   let coverFile = path.join(tmp, 'cover_src.mp3');
   let sourceFile = path.join(tmp, 'source.mp3');
   let passed = false, lastRisk = null, lastQ = null, lastV = null;
+  let origPeak; // the ORIGINAL's vocal-peak ratio (measured once) — reference for the vocal gate
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     log('  indiriliyor + risk/kalite ölçülüyor…');
     await downloadAudio(gen.coverUrl, coverFile);
@@ -108,10 +109,17 @@ async function runOne(cfg, { forceArtist } = {}) {
     // Only run the SLOW vocal check (demucs, ~40 sn) when risk+quality already
     // pass — otherwise we're re-rolling this take anyway, so skip it.
     if (riskOk && lastQ.pass) {
+      // Measure the ORIGINAL's vocal level ONCE (same source across retries) so the
+      // cover is judged relative to it, not a fixed threshold.
+      if (!instrumental && origPeak === undefined && sourceFile) {
+        log('  orijinal vokal seviyesi ölçülüyor (referans)…');
+        origPeak = await sourceVocalPeak(sourceFile, cfg.vocalCheck || {}).catch(() => null);
+        if (origPeak != null) log(`  orijinal vokal tepe: ${origPeak}dB (referans)`);
+      }
       if (!instrumental) log('  vokal analizi (demucs)…');
       lastV = instrumental
         ? { pass: true, reasons: [], metrics: {}, source: 'instrumental (vokal atlandı)' }
-        : await checkVocals(coverFile, cfg.vocalCheck || {});
+        : await checkVocals(coverFile, cfg.vocalCheck || {}, { origPeak: origPeak ?? null });
     } else {
       lastV = { pass: false, reasons: [], metrics: {}, source: 'atlandı' };
     }

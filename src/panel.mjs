@@ -167,6 +167,20 @@ const server = createServer(async (req, res) => {
       pushLog('⚙ günlük hedef = ' + n); return json(res, { ok: true, releasesPerDay: n });
     }
 
+    if (p === '/api/artist-count' && req.method === 'POST') {
+      const { name, count } = JSON.parse(await body(req));
+      const nm = String(name || '').trim();
+      if (!nm) return json(res, { error: 'sanatçı adı gerekli' }, 400);
+      const n = Math.max(0, Math.min(99999, parseInt(count, 10) || 0));
+      const f = rel('state/rotation.json');
+      let st = {}; try { st = JSON.parse(await readFile(f, 'utf8')); } catch {}
+      st.counts = st.counts && typeof st.counts === 'object' ? st.counts : {};
+      st.counts[nm] = n;
+      await mkdir(rel('state'), { recursive: true });
+      await writeFile(f, JSON.stringify(st, null, 2));
+      pushLog('⚙ ' + nm + ' release sayısı = ' + n); return json(res, { ok: true });
+    }
+
     if (p === '/api/run' && req.method === 'POST') {
       const { kind, count, artist } = JSON.parse(await body(req));
       const n = Math.max(1, Math.min(999, parseInt(count, 10) || 1));
@@ -324,7 +338,8 @@ button:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .switch input:checked+.track::after{left:21px;background:#0a0e17}
 /* workspace */
 .workspace{overflow:hidden;margin-bottom:18px}
-.tabs{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--line);overflow-x:auto}
+.tabs{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
 .tab{padding:11px 16px;color:var(--mut);cursor:pointer;border-radius:10px 10px 0 0;position:relative;white-space:nowrap;transition:color .2s;font-size:13.5px}
 .tab:hover{color:var(--fg)}
 .tab.sel{color:var(--fg)}
@@ -353,7 +368,9 @@ textarea:focus{outline:none;border-color:var(--line2);box-shadow:0 0 0 3px rgba(
 .tbl tr.flash{animation:rowflash 1.1s ease}
 @keyframes rowflash{0%{background:rgba(29,185,84,.22)}100%{background:transparent}}
 /* table */
-.tblwrap{border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;overflow-x:auto}
+.tblwrap{border:1px solid var(--line);border-radius:var(--r2);overflow:auto;max-height:46vh}
+.tblwrap.expanded{max-height:none}
+.tbl thead th{position:sticky;top:0;z-index:2;background:#12161f}
 .tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px;min-width:520px}
 .tbl th{text-align:left;color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.7px;padding:11px 12px;background:rgba(255,255,255,.025);border-bottom:1px solid var(--line);white-space:nowrap}
 .tbl td{border-bottom:1px solid var(--line);vertical-align:middle}
@@ -371,11 +388,17 @@ textarea:focus{outline:none;border-color:var(--line2);box-shadow:0 0 0 3px rgba(
 .tbl .st{width:96px;padding-right:10px}
 .tbl .act{width:40px}
 .tbl .act.artistact{width:auto;white-space:nowrap;text-align:right;padding-right:10px}
-.cbadge{display:inline-block;min-width:22px;text-align:center;padding:3px 8px;border-radius:8px;background:rgba(255,255,255,.06);color:var(--dim);font:600 12px 'JetBrains Mono',monospace;border:1px solid var(--line);vertical-align:middle}
+.cbadge{width:44px;text-align:center;padding:4px 4px;border-radius:7px;background:rgba(255,255,255,.06);color:var(--fg);font:600 12px 'JetBrains Mono',monospace;border:1px solid var(--line);vertical-align:middle}
 .cbadge.behind{background:rgba(251,113,133,.15);color:#ffb3bd;border-color:rgba(251,113,133,.45)}
-.mk{margin:0 8px;background:rgba(29,185,84,.12);color:#57e08b;border:1px solid rgba(29,185,84,.35);border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600;cursor:pointer;vertical-align:middle}
+.cbadge.cinput{-moz-appearance:textfield}
+.cbadge.cinput:focus{outline:none;border-color:var(--v);box-shadow:0 0 0 2px rgba(99,102,241,.18)}
+.cbadge.cinput::-webkit-inner-spin-button{opacity:.4}
+.mk{margin:0 6px;background:rgba(29,185,84,.12);color:#57e08b;border:1px solid rgba(29,185,84,.35);border-radius:7px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;vertical-align:middle;min-height:0}
 .mk:hover{background:rgba(29,185,84,.22)}
 .behindtxt{color:#ffb3bd}
+.cbadge.okf{border-color:var(--ok);box-shadow:0 0 0 2px rgba(52,211,153,.2)}
+.expbtn{background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--mut);border-radius:9px;padding:8px 12px;font-size:13px;cursor:pointer}
+.expbtn:hover{color:var(--fg);border-color:var(--line2)}
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
 .badge.done{color:var(--ok);border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
 .badge.wait{color:var(--warn);border-color:rgba(251,191,36,.3);background:rgba(251,191,36,.07)}
@@ -415,8 +438,12 @@ tr:hover .del{opacity:.7}
 .lg.warn{border-color:rgba(251,191,36,.55);background:rgba(251,191,36,.08)}.lg.warn .lgi::before{content:"⚠";color:var(--warn)}.lg.warn .lx{color:#ffe6ad}
 .logempty{color:var(--dim);padding:22px 10px;text-align:center;font-family:Inter,sans-serif}
 @keyframes logIn{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:none}}
-.log::-webkit-scrollbar,textarea::-webkit-scrollbar{width:9px;height:9px}
-.log::-webkit-scrollbar-thumb,textarea::-webkit-scrollbar-thumb{background:var(--line2);border-radius:9px}
+.log,textarea,.tblwrap{scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+.log::-webkit-scrollbar,textarea::-webkit-scrollbar,.tblwrap::-webkit-scrollbar{width:11px;height:11px}
+.log::-webkit-scrollbar-track,textarea::-webkit-scrollbar-track,.tblwrap::-webkit-scrollbar-track{background:transparent}
+.log::-webkit-scrollbar-thumb,textarea::-webkit-scrollbar-thumb,.tblwrap::-webkit-scrollbar-thumb{background:var(--line2);border-radius:10px;border:3px solid transparent;background-clip:padding-box}
+.log::-webkit-scrollbar-thumb:hover,textarea::-webkit-scrollbar-thumb:hover,.tblwrap::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.30);background-clip:padding-box}
+.tblwrap::-webkit-scrollbar-corner{background:transparent}
 @media (max-width:640px){.topbar{margin:10px;padding:12px 14px}.wrap{padding:14px}.hero h1{font-size:24px}.pills{width:100%;margin:8px 0 0}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}}
 </style>`; }
@@ -521,7 +548,7 @@ function renderTableTab(name){
   var hints={queue:'Cover\\'lanacak kaynak şarkılar. <b>Orijinal sanatçı</b> © C-line\\'a girer; mashup ise iki isim virgülle. Link yapıştırırsan besteci+explicit tam o şarkıdan çekilir. <b>🎹 Enst.</b> tikliyse INSTRUMENTAL sürüm üretilir.',artists:'Dağıtım profillerin — release\\'ler sırayla döner. Sağdaki sayı = o sanatçıya giden release. <b class="behindtxt">Kırmızı</b> = eksik (diğerlerinden az). <b>▶ üret</b> ile o sanatçıya özel üretip eşitleyebilirsin (adet: üstteki Release kutusu).'};
   var ths='<th class="idx">#</th>'+t.cols.map(function(c){return '<th'+(c.type==='check'?' class="chk"':'')+(c.title?' title="'+esc(c.title)+'"':'')+'>'+(c.label||c.k.replace(/_/g,' '))+'</th>'}).join('')+(t.status?'<th class="st">Durum</th>':'')+'<th class="act"></th>';
   var lk=name==='queue'?'<div class="lookup"><span class="lki">'+IC.link+'</span><input id="lk" placeholder="Spotify şarkı linki yapıştır → sanatçı + şarkı otomatik dolar" onkeydown="if(event.key===\\'Enter\\'){event.preventDefault();lookupAdd()}"><button id="lkb" class="p" onclick="lookupAdd()">'+IC.link+'Çek</button></div>':'';
-  pn.innerHTML='<div class="hint">'+hints[name]+'</div>'+lk+'<div class="tblwrap"><table class="tbl"><thead><tr>'+ths+'</tr></thead><tbody id="tb"></tbody></table></div><div class="saverow"><button onclick="addRow()">+ Satır ekle</button><button class="p" onclick="saveTable()">'+IC.save+'Kaydet</button><span class="saved" id="sv">'+IC.check+'kaydedildi</span></div>';
+  pn.innerHTML='<div class="hint">'+hints[name]+'</div>'+lk+'<div class="tblwrap"><table class="tbl"><thead><tr>'+ths+'</tr></thead><tbody id="tb"></tbody></table></div><div class="saverow"><button onclick="addRow()">+ Satır ekle</button><button class="p" onclick="saveTable()">'+IC.save+'Kaydet</button><button class="expbtn" onclick="toggleExpand(this)">⤢ Genişlet</button><span class="saved" id="sv">'+IC.check+'kaydedildi</span></div>';
   Promise.all([api('/api/file?name='+FNAME[name]),api('/api/status')]).then(function(a){
     doneCount=a[1].songsDone||0;doneKeys={};(a[1].doneKeys||[]).forEach(function(k){doneKeys[k]=1});
     artistCounts={};artistMax=0;(a[1].artistCounts||[]).forEach(function(x){artistCounts[x.name]=x.count;if(x.count>artistMax)artistMax=x.count});
@@ -538,8 +565,8 @@ function rowEl(name,vals,i){
     return '<td class="cell'+(c.mono?' mono':'')+'"><input value="'+esc(vals[ci]||'').replace(/"/g,'&quot;')+'" placeholder="'+esc(c.ph)+'"></td>'}).join('');
   if(t.status){var done=(name==='queue'&&!!doneKeys[qkey(vals[0],vals[1])]);cells+='<td class="st"><span class="badge '+(done?'done':'wait')+'"><span class="d"></span>'+(done?'işlendi':'sırada')+'</span></td>'}
   if(name==='artists'){var an=(vals[0]||'').trim();var cnt=(an&&artistCounts[an]!=null)?artistCounts[an]:0;var behind=(artistMax>0&&cnt<artistMax);
-    cells+='<td class="act artistact"><span class="cbadge'+(behind?' behind':'')+'" title="bu sanatçıya giden release sayısı'+(behind?' — eksik!':'')+'">'+cnt+'</span>'
-      +'<button class="mk" title="Bu sanatçıya üret (üstteki Release sayısı kadar). Eksik sanatçıları eşitlemek için." onclick="runArtist(this)">▶ üret</button>'
+    cells+='<td class="act artistact"><input class="cbadge cinput'+(behind?' behind':'')+'" type="number" min="0" step="1" value="'+cnt+'" title="bu sanatçıya giden release — elle düzenleyebilirsin" onchange="setArtistCount(this)">'
+      +'<button class="mk" title="Bu sanatçıya üret (üstteki Release sayısı kadar). Eksik sanatçıları eşitlemek için." onclick="runArtist(this)">üret</button>'
       +'<button class="del" title="sil" onclick="this.closest(\\'tr\\').remove()">✕</button></td>';
   } else {
     cells+='<td class="act"><button class="del" title="sil" onclick="this.closest(\\'tr\\').remove()">✕</button></td>';
@@ -554,7 +581,7 @@ function lookupAdd(){var el=$('#lk');if(!el)return;var v=(el.value||'').trim();i
     el.value='';el.focus();
     toast(r.song+' — '+r.artist+(r.explicit?' · 🅴 explicit':'')+(r.composer?' · '+r.composer:'')+'  (Kaydet\\'e basmayı unutma)');
   }).catch(function(){if(btn){btn.disabled=false;btn.classList.remove('busy')}toast('çekilemedi')})}
-function saveTable(){var t=TABLES[tab];var rows=[];$('#tb').querySelectorAll('tr').forEach(function(tr){var r=[],any=false;tr.querySelectorAll('input').forEach(function(inp){if(inp.type==='checkbox'){r.push(inp.checked?'yes':'')}else{var v=inp.value.trim();r.push(v);if(v)any=true}});if(any)rows.push(r)});api('/api/file?name='+FNAME[tab],{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:serializeCsv(t.header,rows)})}).then(function(){flashSaved();refresh()})}
+function saveTable(){var t=TABLES[tab];var rows=[];$('#tb').querySelectorAll('tr').forEach(function(tr){var r=[],any=false;tr.querySelectorAll('input').forEach(function(inp){if(inp.classList.contains('cinput'))return;if(inp.type==='checkbox'){r.push(inp.checked?'yes':'')}else{var v=inp.value.trim();r.push(v);if(v)any=true}});if(any)rows.push(r)});api('/api/file?name='+FNAME[tab],{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:serializeCsv(t.header,rows)})}).then(function(){flashSaved();refresh()})}
 function saveText(){api('/api/file?name=config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:$('#ta').value})}).then(function(r){if(r&&r.error){toast(r.error);return}flashSaved();refresh()})}
 function setCard(i,cls,note){var c=$('#card'+i);if(c){c.classList.remove('warn','crit');if(cls)c.classList.add(cls)}var n=$('#note'+i);if(n)n.textContent=note||''}
 function loadCovers(names){var c=$('#covs');if(!c)return;c.innerHTML=(names||[]).map(function(n){return '<div class="cov"><img src="/covers-preview?n='+encodeURIComponent(n)+'"><b onclick="delCover(\\''+n.replace(/\\\\/g,'').replace(/'/g,'')+'\\')">✕</b></div>'}).join('')||'<div class="hint" style="grid-column:1/-1">Henüz kapak yok — yukarıdan ekle.</div>';}
@@ -562,6 +589,8 @@ function upload(files){var q=[];for(var i=0;i<files.length;i++)(function(f){q.pu
 function delCover(n){api('/api/cover?name='+encodeURIComponent(n),{method:'DELETE'}).then(refresh)}
 function run(kind){var count=1;var bn=$('#batchN');if(bn&&kind.indexOf('batch')===0)count=Math.max(1,parseInt(bn.value,10)||1);api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,count:count})}).then(function(r){if(r.error)toast(r.error);refresh()})}
 function runArtist(btn){var tr=btn.closest('tr');var inp=tr.querySelector('input');var name=inp?inp.value.trim():'';if(!name){toast('önce sanatçı adını yaz');return}var count=1;var bn=$('#batchN');if(bn)count=Math.max(1,parseInt(bn.value,10)||1);if(!confirm(name+' için '+count+' release üretilecek (sırayla). Başlansın mı?'))return;api('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'batch',count:count,artist:name})}).then(function(r){if(r.error){toast(r.error);return}toast(name+' için '+count+' release başladı');refresh()})}
+function toggleExpand(btn){var w=document.querySelector('.tblwrap');if(!w)return;var on=w.classList.toggle('expanded');btn.textContent=on?'⤡ Daralt':'⤢ Genişlet'}
+function setArtistCount(inp){var tr=inp.closest('tr');var ni=tr.querySelector('input');var name=ni?ni.value.trim():'';if(!name){toast('önce sanatçı adını yaz');return}var count=Math.max(0,parseInt(inp.value,10)||0);inp.value=count;api('/api/artist-count',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,count:count})}).then(function(r){if(r&&r.error){toast(r.error);return}inp.classList.add('okf');setTimeout(function(){inp.classList.remove('okf')},900)})}
 function stop(){api('/api/stop',{method:'POST'}).then(refresh)}
 function setAuto(v){if(v&&!confirm('autoSubmit AÇILIYOR — üretilen release\\'ler otomatik YAYINA gönderilir. Emin misin?')){$('#auto').checked=false;return}api('/api/autosubmit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})}).then(refresh)}
 function sizeDaily(){var de=$('#daily');if(de)de.style.width=(((''+de.value).length||1)+0.3)+'ch'}

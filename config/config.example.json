@@ -35,6 +35,8 @@
     "maxMuffleDropDb": 30,
     "//demucs": "Vokal beatin altinda mi (stem ayirma ile KESIN olcum, pip install demucs). demucs PATH'te degilse 'python -m demucs'. minVocalPeakRatioDb: vokal tepe, beat tepesinden bu kadar dB asagidaysa dipte. minVocalRatioDb: ort backstop.",
     "demucsCmd": "auto",
+    "//vocalTolerance": "Cover, ORIJINALIN vokal seviyesine gore degerlendirilir; orijinalden bu kadar dB'den fazla dipteyse reddedilir (absurt). Orijinal olculemezse minVocalPeakRatioDb sabit esigi kullanilir.",
+    "vocalToleranceDb": 4,
     "minVocalPeakRatioDb": -4,
     "minVocalRatioDb": -18
   },
